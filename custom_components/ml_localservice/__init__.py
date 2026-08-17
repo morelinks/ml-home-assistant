@@ -18,6 +18,13 @@ from .const import (
 from .coordinator import MLCoordinator
 from .runtime import MLConfigEntryRuntime
 
+try:
+    from homeassistant.helpers import config_validation as cv
+except ImportError:
+    CONFIG_SCHEMA = None
+else:
+    CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
