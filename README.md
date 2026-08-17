@@ -74,54 +74,6 @@ IP. The raw Home ID and registration token are not stored.
 The diagnostics download redacts the gateway host and includes directory shape,
 mapping classifications and state counts, but not raw ML state values.
 
-## Current mappings and extension
-
-Relay containers (`1811592189610`), placeholder DO devices (`4991543809610`)
-and unknown types remain zero-entity records. The documented category pairs are
-mapped only after their advertised function schema confirms the relevant
-capability:
-
-- `10/10100001`–`10100004`: switching lights (including an advertised
-  one-shot flash), dimmable, colour-temperature and RGB lights, respectively.
-  RGB lights also expose their advertised brightness point;
-- `2/10200005`: electric door lock (`status=true` means locked);
-- `15/11500001`: physical click, double-click and long-press panel actions,
-  exposed as one passive HA event entity with three event types.
-- `15/11500002`: air-conditioner panels, exposed as a separate HA climate
-  device with their advertised power, mode, temperature, fan, and telemetry;
-- `15/11500003`: floor-heating panels, exposed as a separate HA climate device
-  with off/heat, temperature, and advertised temperature/humidity telemetry;
-- `15/11500004`: ventilation panels, exposed as a separate HA fan with their
-  advertised power and low/medium/high presets;
-- `15/11500005`: curtain panels, exposed as a separate HA cover with its
-  advertised position and open/close/stop controls.
-- `3/10300002`–`10300023`: documented security, presence and environmental
-  sensors, exposed as HA binary sensors, sensors, and the person detector's
-  mode switch when its advertised function schema supports them.
-- `6/10600001`: documented air conditioners, exposed as one HA climate entity
-  for power, HVAC mode, target temperature, fan/swing modes, and environmental
-  readings; their mute mode and three-state auxiliary heat setting are exposed
-  as a switch and select entity, respectively.
-- `7/10700001`: documented floor-heating devices, exposed as one HA climate
-  entity with `off`/`heat` modes, target temperature, and current temperature.
-- `8/10800001` and `8/10800004`: documented ventilation devices, exposed as
-  HA fans with on/off and three preset speeds; the first type also exposes its
-  advertised indoor temperature and humidity as sensors.
-- `12/11200001`–`11200009`: documented curtains, exposed as HA covers with
-  open/close/stop and advertised position or tilt controls. Day/night curtains
-  become independent day and night cover entities; rolling-curtain jog actions
-  are exposed as buttons when advertised.
-
-The existing basic-light entity retains its `power` mapping key, so enabling
-new lighting capabilities does not change its entity identity.
-
-New device support is added by implementing the mapper protocol in
-`custom_components/ml_localservice/mapping/base.py` and registering the exact
-type key in `mapping/registry.py`. A mapper returns device metadata, entity
- specifications, mapped states and translated control commands. Adding a
- mapper does not require changes to discovery, transport or coordinator
- ownership.
-
 ## Development and testing
 
 Run the dependency-free suite from the repository root:
