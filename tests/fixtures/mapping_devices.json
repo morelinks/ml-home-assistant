@@ -1,0 +1,111 @@
+{
+  "cmd": "syncDevListResult",
+  "result": "success",
+  "msg": "ok",
+  "reqId": "mapping-fixture",
+  "ts": "1785920346432",
+  "devs": [
+    {
+      "cDevId": "relay-container",
+      "name": "8-channel relay container",
+      "mainType": "fixture",
+      "subType": "1811592189610",
+      "roomId": "",
+      "funs": []
+    },
+    {
+      "cDevId": "unknown-do",
+      "name": "Unknown DO",
+      "mainType": "fixture",
+      "subType": "4991543809610",
+      "roomId": "",
+      "funs": []
+    },
+    {
+      "cDevId": "observed-basic-light",
+      "name": "Basic switching light",
+      "mainType": "10",
+      "subType": "10100001",
+      "roomId": "",
+      "funs": [
+        {
+          "funNo": "switch",
+          "funVal": "",
+          "r": true,
+          "w": true,
+          "min": "",
+          "max": "",
+          "range": ["true", "false"],
+          "ts": ""
+        },
+        {
+          "funNo": "twinkle",
+          "funVal": "",
+          "r": false,
+          "w": true,
+          "min": "",
+          "max": "",
+          "range": [],
+          "ts": ""
+        }
+      ]
+    },
+    {
+      "cDevId": "dimmable-light",
+      "name": "Dimmable light",
+      "mainType": "10",
+      "subType": "10100002",
+      "roomId": "",
+      "funs": [
+        {"funNo": "switch", "funVal": "", "r": true, "w": true, "min": "", "max": "", "range": ["true", "false"], "ts": ""},
+        {"funNo": "bright", "funVal": "", "r": true, "w": true, "min": "0", "max": "100", "ts": ""}
+      ]
+    },
+    {
+      "cDevId": "color-temp-light",
+      "name": "Color temperature light",
+      "mainType": "10",
+      "subType": "10100003",
+      "roomId": "",
+      "funs": [
+        {"funNo": "switch", "funVal": "", "r": true, "w": true, "min": "", "max": "", "range": ["true", "false"], "ts": ""},
+        {"funNo": "bright", "funVal": "", "r": true, "w": true, "min": "0", "max": "100", "ts": ""},
+        {"funNo": "temp", "funVal": "", "r": true, "w": true, "min": "2700", "max": "6500", "ts": ""}
+      ]
+    },
+    {
+      "cDevId": "rgb-light",
+      "name": "RGB light",
+      "mainType": "10",
+      "subType": "10100004",
+      "roomId": "",
+      "funs": [
+        {"funNo": "switch", "funVal": "", "r": true, "w": true, "min": "", "max": "", "range": ["true", "false"], "ts": ""},
+        {"funNo": "bright", "funVal": "", "r": true, "w": true, "min": "0", "max": "100", "ts": ""},
+        {"funNo": "rgb", "funVal": "", "r": true, "w": true, "min": "", "max": "", "ts": ""}
+      ]
+    },
+    {
+      "cDevId": "electric-lock",
+      "name": "Electric lock",
+      "mainType": "2",
+      "subType": "10200005",
+      "roomId": "",
+      "funs": [
+        {"funNo": "status", "funVal": "", "r": true, "w": true, "min": "", "max": "", "range": ["true", "false"], "ts": ""}
+      ]
+    },
+    {
+      "cDevId": "panel-switch",
+      "name": "Panel switch",
+      "mainType": "15",
+      "subType": "11500001",
+      "roomId": "",
+      "funs": [
+        {"funNo": "click", "funVal": "", "r": false, "w": true, "min": "", "max": "", "range": ["true"], "ts": ""},
+        {"funNo": "dbclick", "funVal": "", "r": false, "w": true, "min": "", "max": "", "range": ["true"], "ts": ""},
+        {"funNo": "longpress", "funVal": "", "r": false, "w": true, "min": "", "max": "", "range": ["true"], "ts": ""}
+      ]
+    }
+  ]
+}

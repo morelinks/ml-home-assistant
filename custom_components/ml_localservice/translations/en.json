@@ -1,0 +1,32 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "title": "Add ML gateway",
+        "description": "Enter the ML gateway IPv4 address. The appwsserver connection port is fixed at 8820.",
+        "data": {
+          "host": "IPv4 address"
+        }
+      },
+      "discovery_confirm": {
+        "title": "ML gateway discovered",
+        "description": "An ML gateway was found: {name}. Confirm to verify and add it."
+      }
+    },
+    "error": {
+      "invalid_host": "Enter a valid IPv4 address.",
+      "cannot_connect": "Could not connect to or register with the ML gateway.",
+      "discovery_address_unreachable": "Could not reach the discovered address.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This ML gateway is already configured.",
+      "invalid_discovery": "The discovered service is not an ML gateway.",
+      "invalid_mode": "The discovered service does not advertise md=1.",
+      "missing_gateway_id": "The discovered service has no gateway ID.",
+      "missing_address": "The discovered service has no usable address.",
+      "cannot_connect": "The ML gateway could not be reached or registered."
+    }
+  }
+}
