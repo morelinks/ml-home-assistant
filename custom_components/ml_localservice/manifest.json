@@ -1,10 +1,11 @@
 {
   "domain": "ml_localservice",
   "name": "ML LocalService",
-  "codeowners": [],
+  "codeowners": ["@morelinkslian"],
   "config_flow": true,
-  "documentation": "https://github.com/morelinks/ha_ml_integration",
+  "documentation": "https://github.com/morelinks-iot/ml-home-assistant",
   "integration_type": "hub",
+  "issue_tracker": "https://github.com/morelinks-iot/ml-home-assistant/issues",
   "iot_class": "local_push",
   "requirements": [],
   "version": "0.1.0",

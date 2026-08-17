@@ -14,7 +14,7 @@ except ModuleNotFoundError:  # pragma: no cover - local stdlib-only check
     ConnectionTestError = Exception  # type: ignore[assignment,misc]
 
 
-def _info(*, host: str = "192.168.110.23", gateway_id: str = "HTG0M0000J0L00EQ", md: str = "1") -> SimpleNamespace:
+def _info(*, host: str = "198.51.100.23", gateway_id: str = "TEST-GATEWAY-0001", md: str = "1") -> SimpleNamespace:
     return SimpleNamespace(
         type="_ml-gwconnect._tcp.local.", host=host, ip_address=host,
         hostname="Morelinks.local", port=10009,
@@ -35,7 +35,7 @@ class ConfigFlowTests(unittest.TestCase):
         return flow
 
     def test_discovery_preserves_identity_versions_and_fixed_port(self) -> None:
-        data = _discovery_data(_info(), "HTG0M0000J0L00EQ", "192.168.110.23")
+        data = _discovery_data(_info(), "TEST-GATEWAY-0001", "198.51.100.23")
         self.assertEqual(data["gateway_id"], "HTG0M0000J0L00EQ")
         self.assertEqual(data["port"], 8820)
         self.assertEqual(data["sv"], "4.1.6-18")
@@ -64,7 +64,7 @@ class ConfigFlowTests(unittest.TestCase):
             flow = self._flow()
             flow._abort_if_unique_id_configured = lambda **kwargs: None
             with patch("custom_components.ml_localservice.config_flow.async_test_connection", new=AsyncMock(return_value="a" * 32)):
-                return await flow.async_step_user({"host": "192.168.110.23"})
+                return await flow.async_step_user({"host": "198.51.100.23"})
 
         result = asyncio.run(run())
         self.assertEqual(result["type"], "create_entry")
@@ -119,5 +119,5 @@ class ConfigFlowTests(unittest.TestCase):
 
         result = asyncio.run(run())
         self.assertEqual(result["type"], "create_entry")
-        self.assertEqual(result["title"], "HTG0M0000J0L00EQ · 192.168.110.23")
+        self.assertEqual(result["title"], "TEST-GATEWAY-0001 · 198.51.100.23")
         self.assertEqual(result["data"]["home_fingerprint"], "a" * 32)

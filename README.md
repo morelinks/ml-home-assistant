@@ -1,5 +1,10 @@
 # ML LocalService Home Assistant Integration
 
+[![HACS validation](https://github.com/morelinks-iot/ml-home-assistant/actions/workflows/validate.yaml/badge.svg)](https://github.com/morelinks-iot/ml-home-assistant/actions/workflows/validate.yaml)
+
+ML LocalService is a local Home Assistant integration for MoreLinks ML
+gateways. It is distributed under the [Apache-2.0 license](LICENSE).
+
 `ml_localservice` discovers MoreLinks ML gateways over mDNS and connects to the
 gateway's local `appwsserver`. Each
 Config Entry owns one persistent WebSocket client and one coordinator. Entities
@@ -22,6 +27,16 @@ integration intentionally uses the separate, fixed appwsserver port 8820.
 
 ## Installation and configuration
 
+### HACS
+
+After this repository is accepted by HACS, search for **ML LocalService** in
+HACS and install it from the Integrations section. Until it is listed in the
+HACS default repository, add
+`morelinks-iot/ml-home-assistant` as a HACS Custom repository with category
+**Integration**.
+
+### Manual installation
+
 1. Copy `custom_components/ml_localservice` into the Home Assistant
    `config/custom_components/` directory.
 2. Restart Home Assistant.
@@ -30,6 +45,11 @@ or choose **Add integration → ML LocalService** and enter the gateway IPv4
 address manually.
 4. Verify that the Config Entry becomes loaded and that supported entities are
    attached to their corresponding ML devices.
+
+### Uninstallation
+
+Remove the **ML LocalService** config entry first, then remove the
+`custom_components/ml_localservice` directory and restart Home Assistant.
 
 The mDNS guide `id` is the stable Config Entry identity. A later mDNS
 announcement for the same guide is registration-checked before updating the
@@ -120,3 +140,20 @@ For live validation, first confirm the mDNS TXT `id`, then verify registration,
 device/state synchronization, mapped entity state, control confirmation,
 reconnection and unload cleanup. Restore any physical output changed by the
 test. Never store host-search tokens; they are one-shot registration material.
+
+## Support
+
+For usage questions and reproducible bugs, open an issue in the
+[GitHub issue tracker](https://github.com/morelinks-iot/ml-home-assistant/issues).
+Please include the Home Assistant version, integration version, relevant
+diagnostics with secrets removed, and steps to reproduce. Do not include
+gateway tokens, Home IDs, passwords, or private network details.
+
+## Security
+
+Please do not report security vulnerabilities in a public issue. Use GitHub's
+private vulnerability reporting for this repository. If private reporting is
+not available in your GitHub view, contact the maintainer account
+[@morelinkslian](https://github.com/morelinkslian) privately before publishing
+details. Do not include registration tokens, gateway identifiers, or decrypted
+protocol payloads in a public report.
