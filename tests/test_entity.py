@@ -116,8 +116,41 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
         await self.entity.async_turn_off()
         self.assertEqual(
             [(command.fun_no, command.fun_val) for command in self.coordinator.commands],
-            [("switch", "true"), ("twinkle", "true"), ("switch", "false")],
+            [("twinkle", "true"), ("switch", "false")],
         )
+
+    async def test_light_parameters_never_add_power_control(self) -> None:
+        devices = {
+            device.c_dev_id: device
+            for device in parse_devices(json.loads(FIXTURE.read_text(encoding="utf-8")))
+        }
+        cases = (
+            ("dimmable-light", {"brightness": 255}, ("bright", "100")),
+            ("color-temp-light", {"color_temp_kelvin": 3500}, ("temp", "3500")),
+            ("rgb-light", {"rgb_color": (255, 0, 16)}, ("rgb", "#FF0010")),
+            ("observed-basic-light", {"flash": "short"}, ("twinkle", "true")),
+        )
+        for device_id, parameters, expected in cases:
+            device = devices[device_id]
+            coordinator = FakeCoordinator(device)
+            runtime = MLConfigEntryRuntime(coordinator, "gateway-1")  # type: ignore[arg-type]
+            light = MLLightEntity(runtime, runtime.registry.describe(device).entities[0])
+            for power in ("true", "false", None):
+                with self.subTest(device=device_id, power=power):
+                    coordinator.set_states({} if power is None else {"switch": power})
+                    coordinator.commands.clear()
+                    await light.async_turn_on(**parameters)
+                    self.assertEqual(
+                        [(cmd.fun_no, cmd.fun_val) for cmd in coordinator.commands],
+                        [expected],
+                    )
+            coordinator.commands.clear()
+            await light.async_turn_on()
+            await light.async_turn_off()
+            self.assertEqual(
+                [(cmd.fun_no, cmd.fun_val) for cmd in coordinator.commands],
+                [("switch", "true"), ("switch", "false")],
+            )
 
     async def test_invalid_or_unsynchronized_state_is_unavailable(self) -> None:
         self.coordinator.set_state("invalid")
@@ -151,7 +184,7 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
         await light.async_turn_on(brightness=255, color_temp_kelvin=3500)
         self.assertEqual(
             [(command.fun_no, command.fun_val) for command in light_coordinator.commands],
-            [("switch", "true"), ("bright", "100"), ("temp", "3500")],
+            [("bright", "100"), ("temp", "3500")],
         )
 
         rgb_light = devices["rgb-light"]
@@ -167,7 +200,7 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
         await rgb.async_turn_on(brightness=128, rgb_color=(255, 0, 16))
         self.assertEqual(
             [(command.fun_no, command.fun_val) for command in rgb_coordinator.commands],
-            [("switch", "true"), ("bright", "50"), ("rgb", "#FF0010")],
+            [("bright", "50"), ("rgb", "#FF0010")],
         )
 
         lock_device = devices["electric-lock"]
@@ -277,8 +310,20 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(aux_heat.options, ["auto", "on", "off"])
         self.assertEqual(
             [(command.fun_no, command.fun_val) for command in coordinator.commands],
-            [("switch", "true"), ("mode", "1"), ("settemp", "25"), ("windspeed", "2"), ("sweep", "0"), ("mute_mode", "false"), ("aux_heat", "1")],
+            [("mode", "1"), ("settemp", "25"), ("windspeed", "2"), ("sweep", "0"), ("mute_mode", "false"), ("aux_heat", "1")],
         )
+
+        for power in ("true", "false", None):
+            with self.subTest(power=power):
+                coordinator.set_states({} if power is None else {"switch": power})
+                coordinator.commands.clear()
+                await climate.async_set_hvac_mode(HVACMode.COOL)
+                await climate.async_turn_on()
+                await climate.async_set_hvac_mode(HVACMode.OFF)
+                self.assertEqual(
+                    [(cmd.fun_no, cmd.fun_val) for cmd in coordinator.commands],
+                    [("mode", "2"), ("switch", "true"), ("switch", "false")],
+                )
 
     async def test_floor_heat_climate_entity_uses_zero_temperature_bounds(self) -> None:
         device = MLDevice(
@@ -340,8 +385,20 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
         await fan.async_turn_off()
         self.assertEqual(
             [(command.fun_no, command.fun_val) for command in coordinator.commands],
-            [("switch", "true"), ("windspeed", "1"), ("switch", "false")],
+            [("windspeed", "1"), ("switch", "false")],
         )
+
+        for power in ("true", "false", None):
+            with self.subTest(power=power):
+                coordinator.set_states({} if power is None else {"switch": power})
+                coordinator.commands.clear()
+                await fan.async_turn_on(preset_mode="medium")
+                await fan.async_turn_on()
+                await fan.async_turn_off()
+                self.assertEqual(
+                    [(cmd.fun_no, cmd.fun_val) for cmd in coordinator.commands],
+                    [("windspeed", "1"), ("switch", "true"), ("switch", "false")],
+                )
 
     async def test_curtain_cover_entity_maps_position_tilt_and_actions(self) -> None:
         device = MLDevice(

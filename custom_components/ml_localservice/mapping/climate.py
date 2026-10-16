@@ -201,10 +201,7 @@ class AirConditionerMapper:
             if command.value == "off":
                 return (MLControlCommand(device.c_dev_id, _POWER, _FALSE),)
             raw_mode = self._raw_value(device, _MODE, _HVAC_MODES, command.value)
-            return (
-                MLControlCommand(device.c_dev_id, _POWER, _TRUE),
-                MLControlCommand(device.c_dev_id, _MODE, raw_mode),
-            )
+            return (MLControlCommand(device.c_dev_id, _MODE, raw_mode),)
         if command.name == "set_temperature":
             return (
                 MLControlCommand(

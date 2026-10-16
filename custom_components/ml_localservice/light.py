@@ -56,7 +56,12 @@ class MLLightEntity(MLEntity, LightEntity):
         return None
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.async_execute_command(HACommand("turn_on"))
+        # Parameter controls go directly to ML without an implicit power command.
+        has_parameters = any(
+            key in kwargs for key in ("brightness", "color_temp_kelvin", "rgb_color")
+        ) or ("flash" in kwargs and "flash" in self._spec.commands)
+        if not has_parameters:
+            await self.async_execute_command(HACommand("turn_on"))
         if "brightness" in kwargs:
             await self.async_execute_command(HACommand("set_brightness", kwargs["brightness"]))
         if "color_temp_kelvin" in kwargs:

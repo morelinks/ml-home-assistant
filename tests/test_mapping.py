@@ -316,7 +316,6 @@ class MappingTests(unittest.TestCase):
                 air_conditioner, aircon, HACommand("set_hvac_mode", "cool")
             ),
             (
-                MLControlCommand(air_conditioner.c_dev_id, "switch", "true"),
                 MLControlCommand(air_conditioner.c_dev_id, "mode", "2"),
             ),
         )
@@ -595,7 +594,7 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(states[2].attributes["select_options"], ("auto", "on", "off"))
         self.assertEqual(
             mapper.map_command(device, climate, HACommand("set_hvac_mode", "cool")),
-            (MLControlCommand(device.c_dev_id, "switch", "true"), MLControlCommand(device.c_dev_id, "mode", "2")),
+            (MLControlCommand(device.c_dev_id, "mode", "2"),),
         )
         self.assertEqual(
             mapper.map_command(device, climate, HACommand("set_hvac_mode", "off")),

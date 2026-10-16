@@ -53,9 +53,10 @@ class MLFanEntity(MLEntity, FanEntity):
     ) -> None:
         if percentage is not None:
             raise ValueError("ML ventilation fans do not support percentage speed")
-        await self.async_execute_command(HACommand("turn_on"))
         if preset_mode is not None:
             await self.async_execute_command(HACommand("set_preset_mode", preset_mode))
+        else:
+            await self.async_execute_command(HACommand("turn_on"))
 
     async def async_turn_off(self, **_kwargs: Any) -> None:
         await self.async_execute_command(HACommand("turn_off"))
