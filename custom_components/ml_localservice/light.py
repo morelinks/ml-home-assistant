@@ -11,6 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .entity import MLEntity
 from .mapping import HACommand
+from .mapping.light import DEFAULT_COLOR_TEMP_LIMITS, color_temp_limits
 from .platform import async_setup_ml_platform
 from .runtime import MLConfigEntryRuntime
 
@@ -47,6 +48,21 @@ class MLLightEntity(MLEntity, LightEntity):
     def color_temp_kelvin(self) -> int | None:
         value = self._mapped_state.attributes.get("color_temp_kelvin")
         return value if isinstance(value, int) else None
+
+    @property
+    def min_color_temp_kelvin(self) -> int:
+        return self._color_temp_limits()[0]
+
+    @property
+    def max_color_temp_kelvin(self) -> int:
+        return self._color_temp_limits()[1]
+
+    def _color_temp_limits(self) -> tuple[int, int]:
+        try:
+            return color_temp_limits(self._device)
+        except ValueError:
+            # Keep the entity readable; malformed limits still reject controls.
+            return DEFAULT_COLOR_TEMP_LIMITS
 
     @property
     def rgb_color(self) -> tuple[int, int, int] | None:

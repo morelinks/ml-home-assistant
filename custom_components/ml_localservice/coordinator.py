@@ -92,7 +92,7 @@ ClientFactory = Callable[[], MLClientProtocol]
 
 @dataclass(slots=True)
 class _ControlWaiter:
-    expected_value: str
+    command: MLControlCommand
     future: asyncio.Future[None]
 
 
@@ -274,7 +274,7 @@ class MLCoordinator:
         loop = asyncio.get_running_loop()
         future: asyncio.Future[None] = loop.create_future()
         key = (command.c_dev_id, command.fun_no)
-        waiter = _ControlWaiter(command.fun_val, future)
+        waiter = _ControlWaiter(command, future)
         self._control_waiters.setdefault(key, []).append(waiter)
         try:
             result = await client.control(command)
@@ -292,7 +292,7 @@ class MLCoordinator:
             self._replace_states(states, preserve_after=revision)
             self._notify_state_listeners()
             current = self._states.get(command.c_dev_id, {}).get(command.fun_no)
-            if current == command.fun_val:
+            if command.matches_state(current):
                 return result
             raise MLControlConfirmationTimeout(
                 f"control accepted but {command.c_dev_id}/{command.fun_no} "
@@ -566,7 +566,7 @@ class MLCoordinator:
     def _confirm_control_waiters(self, event: MLDeviceState) -> None:
         key = (event.c_dev_id, event.fun_no)
         for waiter in tuple(self._control_waiters.get(key, ())):
-            if waiter.expected_value == event.fun_val and not waiter.future.done():
+            if waiter.command.matches_state(event.fun_val) and not waiter.future.done():
                 waiter.future.set_result(None)
 
     def _remove_control_waiter(

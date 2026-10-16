@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import unittest
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 
 from custom_components.ml_localservice.mapping import (
@@ -32,6 +33,7 @@ from custom_components.ml_localservice.models import (
     MLFunction,
     parse_devices,
 )
+from custom_components.ml_localservice.mapping.light import color_temp_limits
 
 FIXTURE = Path(__file__).with_name("fixtures") / "mapping_devices.json"
 
@@ -240,6 +242,50 @@ class MappingTests(unittest.TestCase):
             ),
             (MLControlCommand(rgb.c_dev_id, "rgb", "#FF0010"),),
         )
+
+    def test_color_temperature_clamps_to_advertised_ml_limits(self) -> None:
+        source = self.devices["color-temp-light"]
+        device = replace(source, functions=tuple(
+            replace(fun, minimum="2000", maximum="6000") if fun.fun_no == "temp" else fun
+            for fun in source.functions
+        ))
+        mapper = self.registry.resolve(device)
+        entity = mapper.map_entities(device)[0]
+        self.assertEqual(color_temp_limits(device), (2000, 6000))
+        for requested, expected in ((1800, "2000"), (2000, "2000"), (2221, "2221"),
+                                    (2646, "2646"), (3043, "3043"), (6000, "6000"),
+                                    (6535, "6000")):
+            with self.subTest(requested=requested):
+                command, = mapper.map_command(device, entity, HACommand("set_color_temp", requested))
+                self.assertEqual(command.fun_val, expected)
+                self.assertEqual(command.confirmation_tolerance, 100)
+                self.assertEqual(command.to_payload(), {
+                    "cDevId": device.c_dev_id, "funNo": "temp", "funVal": expected,
+                })
+        for invalid in (True, None, "4000", 4000.5):
+            with self.subTest(invalid=invalid), self.assertRaises(UnsupportedHACommandError):
+                mapper.map_command(device, entity, HACommand("set_color_temp", invalid))
+        brightness, = mapper.map_command(device, entity, HACommand("set_brightness", 128))
+        self.assertEqual(brightness.confirmation_tolerance, 0)
+
+    def test_color_temperature_defaults_and_invalid_declared_limits(self) -> None:
+        source = self.devices["color-temp-light"]
+        for lower, upper, expected in (("", "", (2000, 6535)),
+                                       ("2000", "6000", (2000, 6000)),
+                                       ("3000", "5000", (3000, 5000))):
+            device = replace(source, functions=tuple(
+                replace(fun, minimum=lower, maximum=upper) if fun.fun_no == "temp" else fun
+                for fun in source.functions
+            ))
+            self.assertEqual(color_temp_limits(device), expected)
+        for lower, upper in (("bad", "6000"), ("6000", "2000"), ("0", "6000")):
+            device = replace(source, functions=tuple(
+                replace(fun, minimum=lower, maximum=upper) if fun.fun_no == "temp" else fun
+                for fun in source.functions
+            ))
+            mapper = self.registry.resolve(device)
+            with self.subTest(lower=lower, upper=upper), self.assertRaises(ValueError):
+                mapper.map_command(device, mapper.map_entities(device)[0], HACommand("set_color_temp", 4000))
 
     def test_light_remains_available_when_optional_snapshot_values_are_missing(self) -> None:
         cases = (

@@ -138,11 +138,19 @@ class MLControlCommand:
     inner_fun_no: str | None = None
     open_device_id: str | None = None
     app_device_type_id: str | None = None
+    # Local confirmation policy only; never included in the ML wire payload.
+    confirmation_tolerance: int = 0
 
     def __post_init__(self) -> None:
         _string(self.c_dev_id, "control.c_dev_id", maximum=127)
         _string(self.fun_no, "control.fun_no", maximum=31)
         _string(self.fun_val, "control.fun_val", maximum=1023, allow_empty=True)
+        if (
+            isinstance(self.confirmation_tolerance, bool)
+            or not isinstance(self.confirmation_tolerance, int)
+            or self.confirmation_tolerance < 0
+        ):
+            raise _fail("control.confirmation_tolerance", "must be a non-negative integer")
         optional = (
             ("inner_fun_no", self.inner_fun_no, 31),
             ("open_device_id", self.open_device_id, 31),
@@ -157,6 +165,17 @@ class MLControlCommand:
         for name, value, maximum in optional:
             if value is not None:
                 _string(value, f"control.{name}", maximum=maximum)
+
+    def matches_state(self, value: str | None) -> bool:
+        """Match exact states by default, or bounded integer telemetry error."""
+        if self.confirmation_tolerance == 0:
+            return value == self.fun_val
+        if value is None:
+            return False
+        try:
+            return abs(int(value) - int(self.fun_val)) <= self.confirmation_tolerance
+        except ValueError:
+            return False
 
     def to_payload(self) -> dict[str, str]:
         """Build the protocol fields without adding transport correlation data."""

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import unittest
 from pathlib import Path
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -151,6 +152,32 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
                 [(cmd.fun_no, cmd.fun_val) for cmd in coordinator.commands],
                 [("switch", "true"), ("switch", "false")],
             )
+
+    async def test_color_temperature_ui_and_controls_follow_ml_directory(self) -> None:
+        devices = {dev.c_dev_id: dev for dev in parse_devices(json.loads(FIXTURE.read_text()))}
+        source = devices["color-temp-light"]
+        device = replace(source, functions=tuple(
+            replace(fun, minimum="2000", maximum="6000") if fun.fun_no == "temp" else fun
+            for fun in source.functions
+        ))
+        coordinator = FakeCoordinator(device)
+        runtime = MLConfigEntryRuntime(coordinator, "gateway-1")  # type: ignore[arg-type]
+        light = MLLightEntity(runtime, runtime.registry.describe(device).entities[0])
+        for states in ({"switch": "true", "temp": "4000"}, {}):
+            coordinator.set_states(states)
+            self.assertEqual((light.min_color_temp_kelvin, light.max_color_temp_kelvin), (2000, 6000))
+        await light.async_turn_on(color_temp_kelvin=6535)
+        command, = coordinator.commands
+        self.assertEqual((command.fun_no, command.fun_val, command.confirmation_tolerance), ("temp", "6000", 100))
+        # Directory changes must update UI bounds without recreating the entity.
+        changed = replace(device, functions=tuple(
+            replace(fun, minimum="3000", maximum="5000") if fun.fun_no == "temp" else fun
+            for fun in device.functions
+        ))
+        coordinator.data.devices[device.c_dev_id] = changed
+        self.assertEqual((light.min_color_temp_kelvin, light.max_color_temp_kelvin), (3000, 5000))
+        await light.async_turn_on(color_temp_kelvin=2000)
+        self.assertEqual(coordinator.commands[-1].fun_val, "3000")
 
     async def test_invalid_or_unsynchronized_state_is_unavailable(self) -> None:
         self.coordinator.set_state("invalid")

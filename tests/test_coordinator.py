@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import unittest
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 
 from custom_components.ml_localservice.client import MLConnectionClosedError
+from custom_components.ml_localservice.mapping import HACommand, create_default_registry
 from custom_components.ml_localservice.coordinator import (
     MLControlConfirmationTimeout,
     MLCoordinator,
@@ -51,6 +53,24 @@ def device(
 
 def state(value: str, *, c_dev_id: str = "device-1") -> MLDeviceState:
     return MLDeviceState(c_dev_id, "switch", value, "1785920352000")
+
+
+def color_temp_device() -> MLDevice:
+    source = device(sub_type="10100003")
+    return replace(source, functions=source.functions + (
+        MLFunction("temp", "", True, True, "2000", "6000", None, ""),
+    ))
+
+
+def temp_state(value: str) -> MLDeviceState:
+    return MLDeviceState("device-1", "temp", value, "1785920352000")
+
+
+def color_temp_command(requested: int = 4000) -> MLControlCommand:
+    lamp = color_temp_device()
+    mapper = create_default_registry().resolve(lamp)
+    command, = mapper.map_command(lamp, mapper.map_entities(lamp)[0], HACommand("set_color_temp", requested))
+    return command
 
 
 class FakeClient:
@@ -280,6 +300,55 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         result = await asyncio.wait_for(control, 0.2)
         self.assertTrue(result.success)
         self.assertEqual(coordinator.data.states["device-1"]["switch"], "true")
+
+    async def test_color_temperature_tolerance_waits_for_new_matching_push(self) -> None:
+        for matching in ("3900", "4100"):
+            with self.subTest(matching=matching):
+                # The already-matching cache cannot confirm the new control.
+                client = FakeClient([(color_temp_device(),)], [(temp_state("4000"),)])
+                coordinator = self.coordinator([client], confirmation_timeout=0.5)
+                await coordinator.async_start()
+                control = asyncio.create_task(coordinator.async_control(color_temp_command()))
+                await asyncio.wait_for(client.control_called.wait(), 0.2)
+                self.assertFalse(control.done())
+                for invalid in ("3899", "4101", "bad", "NaN"):
+                    await client.events.put(temp_state(invalid))
+                    await wait_until(lambda: coordinator.data.states["device-1"].get("temp") == invalid)
+                    self.assertFalse(control.done(), invalid)
+                await client.events.put(temp_state(matching))
+                self.assertTrue((await asyncio.wait_for(control, 0.2)).success)
+                self.assertEqual(client.calls.count("sync_states"), 1)
+                self.assertEqual(coordinator.data.states["device-1"]["temp"], matching)
+
+    async def test_color_temperature_recheck_uses_same_tolerance(self) -> None:
+        for value in ("3900", "4100", "3899", "4101", "bad", None):
+            with self.subTest(value=value):
+                snapshot = () if value is None else (temp_state(value),)
+                client = FakeClient([(color_temp_device(),)], [(temp_state("4000"),), snapshot])
+                coordinator = self.coordinator([client])
+                await coordinator.async_start()
+                if value in ("3900", "4100"):
+                    self.assertTrue((await coordinator.async_control(color_temp_command())).success)
+                else:
+                    with self.assertRaises(MLControlConfirmationTimeout):
+                        await coordinator.async_control(color_temp_command())
+                self.assertEqual(client.calls.count("sync_states"), 2)
+                self.assertFalse(coordinator._control_waiters)
+
+    async def test_clamped_color_temperature_confirms_adjusted_target(self) -> None:
+        client = FakeClient([(color_temp_device(),)], [(temp_state("4000"),)])
+        client.on_control = lambda command: client.events.put_nowait(temp_state("5900"))
+        coordinator = self.coordinator([client], confirmation_timeout=0.5)
+        await coordinator.async_start()
+        self.assertTrue((await coordinator.async_control(color_temp_command(6535))).success)
+        self.assertEqual(client.calls.count("sync_states"), 1)
+
+    async def test_numeric_control_without_tolerance_still_requires_exact_match(self) -> None:
+        client = FakeClient([(color_temp_device(),)], [(temp_state("3900"),)])
+        coordinator = self.coordinator([client])
+        await coordinator.async_start()
+        with self.assertRaises(MLControlConfirmationTimeout):
+            await coordinator.async_control(MLControlCommand("device-1", "temp", "4000"))
 
     async def test_control_timeout_performs_one_full_state_recheck(self) -> None:
         client = FakeClient(

@@ -16,6 +16,20 @@ _BRIGHTNESS = "bright"
 _COLOR_TEMP = "temp"
 _RGB = "rgb"
 _TWINKLE = "twinkle"
+DEFAULT_COLOR_TEMP_LIMITS = (2000, 6535)
+
+
+def color_temp_limits(device: MLDevice | None) -> tuple[int, int]:
+    """Return ML's advertised Kelvin limits for both HA and command mapping."""
+    function = next(
+        (item for item in device.functions if item.fun_no == _COLOR_TEMP), None
+    ) if device is not None else None
+    if function is None:
+        return DEFAULT_COLOR_TEMP_LIMITS
+    minimum, maximum = LightMapper._limits(function, *DEFAULT_COLOR_TEMP_LIMITS)
+    if minimum <= 0:
+        raise ValueError("color temperature limits must be positive")
+    return minimum, maximum
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,7 +147,11 @@ class LightMapper:
             return (MLControlCommand(device.c_dev_id, _BRIGHTNESS, value),)
         if command.name == "set_color_temp":
             value = self._integer_command(device, _COLOR_TEMP, command.value)
-            return (MLControlCommand(device.c_dev_id, _COLOR_TEMP, value),)
+            return (
+                MLControlCommand(
+                    device.c_dev_id, _COLOR_TEMP, value, confirmation_tolerance=100
+                ),
+            )
         if command.name == "set_rgb_color":
             value = self._rgb_command(command.value)
             return (MLControlCommand(device.c_dev_id, _RGB, value),)
@@ -188,7 +206,7 @@ class LightMapper:
     def _parse_int(self, value: str | None, function: MLFunction) -> int:
         if value is None:
             raise ValueError("missing integer value")
-        minimum, maximum = self._limits(function, 2700, 6500)
+        minimum, maximum = self._limits(function, *DEFAULT_COLOR_TEMP_LIMITS)
         try:
             parsed = int(value)
         except ValueError as err:
@@ -226,12 +244,8 @@ class LightMapper:
         function = self._function(device, fun_no)
         if function is None:
             raise UnsupportedHACommandError("color temperature is not supported")
-        minimum, maximum = self._limits(function, 2700, 6500)
-        if not minimum <= value <= maximum:
-            raise UnsupportedHACommandError(
-                f"color temperature must be between {minimum} and {maximum} K"
-            )
-        return str(value)
+        minimum, maximum = color_temp_limits(device)
+        return str(min(maximum, max(minimum, value)))
 
     @staticmethod
     def _rgb_command(value: object | None) -> str:

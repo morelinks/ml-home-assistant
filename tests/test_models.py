@@ -104,6 +104,21 @@ class ModelTests(unittest.TestCase):
         with self.assertRaises(MLModelValidationError):
             parse_devices(duplicate)
 
+    def test_numeric_confirmation_tolerance_preserves_exact_defaults(self) -> None:
+        command = MLControlCommand("fixture-device", "temp", "4000", confirmation_tolerance=100)
+        for value in ("3900", "4000", "4100"):
+            self.assertTrue(command.matches_state(value), value)
+        for value in ("3899", "4101", "bad", "NaN", "4000.5", None):
+            self.assertFalse(command.matches_state(value), value)
+        self.assertFalse(MLControlCommand("fixture-device", "bright", "50").matches_state("51"))
+        self.assertFalse(MLControlCommand("fixture-device", "switch", "true").matches_state("1"))
+        self.assertEqual(command.to_payload(), {
+            "cDevId": "fixture-device", "funNo": "temp", "funVal": "4000",
+        })
+        for invalid in (-1, True, 1.5, "100"):
+            with self.subTest(invalid=invalid), self.assertRaises(MLModelValidationError):
+                MLControlCommand("fixture-device", "temp", "4000", confirmation_tolerance=invalid)
+
     def test_control_optional_routing_fields_are_all_or_nothing(self) -> None:
         with self.assertRaises(MLModelValidationError):
             MLControlCommand(
