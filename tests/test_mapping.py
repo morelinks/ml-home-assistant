@@ -395,16 +395,31 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(
             dict(floor_state.attributes)["current_humidity"], 45.0
         )
+        self.assertEqual(floor_state.attributes["max_temp"], 31.0)
+        self.assertEqual(
+            self.registry.resolve(floor_heat).map_state(
+                floor_heat, {"switch": "true", "settemp": "40"}
+            )[0].attributes["target_temperature"],
+            31.0,
+        )
+        self.assertEqual(
+            self.registry.resolve(floor_heat).map_state(
+                floor_heat, {"switch": "true", "settemp": "10"}
+            )[0].attributes["target_temperature"],
+            16.0,
+        )
         self.assertEqual(
             self.registry.resolve(floor_heat).map_command(
-                floor_heat, floor_climate, HACommand("set_temperature", 31)
+                floor_heat, floor_climate, HACommand("set_temperature", 36)
             ),
             (MLControlCommand(floor_heat.c_dev_id, "settemp", "31"),),
         )
-        with self.assertRaises(UnsupportedHACommandError):
+        self.assertEqual(
             self.registry.resolve(floor_heat).map_command(
                 floor_heat, floor_climate, HACommand("set_temperature", 15)
-            )
+            ),
+            (MLControlCommand(floor_heat.c_dev_id, "settemp", "16"),),
+        )
 
         ventilation = MLDevice(
             "ventilation-panel",
@@ -688,6 +703,81 @@ class MappingTests(unittest.TestCase):
         with self.assertRaises(UnsupportedHACommandError):
             mapper.map_command(valid, climate, HACommand("set_temperature", 20))
 
+    def test_air_conditioner_uses_reported_range_and_clamps_target_feedback(self) -> None:
+        device = MLDevice(
+            "air-conditioner", "Air conditioner", "6", "10600001", "", (
+                self._aircon_function("switch"),
+                self._aircon_function("mode"),
+                MLFunction("settemp", "", True, True, "16", "35", None, ""),
+            )
+        )
+        mapper = self.registry.resolve(device)
+        entity = self.registry.describe(device).entities[0]
+        state = mapper.map_state(
+            device, {"switch": "true", "mode": "1", "settemp": "40"}
+        )[0]
+        self.assertTrue(state.available)
+        self.assertEqual(state.attributes["max_temp"], 35.0)
+        self.assertEqual(state.attributes["target_temperature"], 35.0)
+        self.assertEqual(
+            mapper.map_state(
+                device, {"switch": "true", "mode": "1", "settemp": "10"}
+            )[0].attributes["target_temperature"],
+            16.0,
+        )
+        self.assertEqual(
+            mapper.map_command(device, entity, HACommand("set_temperature", 35)),
+            (MLControlCommand(device.c_dev_id, "settemp", "35"),),
+        )
+        self.assertEqual(
+            mapper.map_command(device, entity, HACommand("set_temperature", 36)),
+            (MLControlCommand(device.c_dev_id, "settemp", "35"),),
+        )
+        higher = replace(
+            device,
+            functions=tuple(
+                replace(function, maximum="40")
+                if function.fun_no == "settemp" else function
+                for function in device.functions
+            ),
+        )
+        higher_state = mapper.map_state(
+            higher, {"switch": "true", "mode": "1", "settemp": "40"}
+        )[0]
+        self.assertEqual(higher_state.attributes["max_temp"], 40.0)
+        self.assertEqual(higher_state.attributes["target_temperature"], 40.0)
+
+    def test_climate_temperature_range_falls_back_for_missing_or_invalid_bounds(self) -> None:
+        devices = (
+            MLDevice(
+                "air-conditioner", "Air conditioner", "6", "10600001", "", (
+                    self._aircon_function("switch"),
+                    self._aircon_function("mode"),
+                    MLFunction("settemp", "", True, True, "", "nan", None, ""),
+                ),
+            ),
+            MLDevice(
+                "floor-heat-panel", "Floor heating panel", "15", "11500003", "", (
+                    MLFunction("switch", "", True, True, "", "", ("true", "false"), ""),
+                    MLFunction("settemp", "", True, True, "40", "30", None, ""),
+                ),
+            ),
+        )
+        for device in devices:
+            with self.subTest(device=device.c_dev_id):
+                mapper = self.registry.resolve(device)
+                entity = self.registry.describe(device).entities[0]
+                state = mapper.map_state(device, {"switch": "true", "mode": "1", "settemp": "40"})[0]
+                self.assertEqual(state.attributes["min_temp"], 16.0)
+                self.assertEqual(state.attributes["max_temp"], 36.0)
+                self.assertEqual(state.attributes["target_temperature"], 36.0)
+                self.assertEqual(
+                    mapper.map_command(device, entity, HACommand("set_temperature", 40)),
+                    (MLControlCommand(device.c_dev_id, "settemp", "36"),),
+                )
+                with self.assertRaises(UnsupportedHACommandError):
+                    mapper.map_command(device, entity, HACommand("set_temperature", float("nan")))
+
     def test_documented_floor_heat_maps_climate_state_and_commands(self) -> None:
         device = MLDevice(
             "floor-heat",
@@ -762,8 +852,10 @@ class MappingTests(unittest.TestCase):
         self.assertFalse(mapper.map_state(device, {"switch": "invalid"})[0].available)
         with self.assertRaises(UnsupportedHACommandError):
             mapper.map_command(device, entity, HACommand("set_hvac_mode", "cool"))
-        with self.assertRaises(UnsupportedHACommandError):
-            mapper.map_command(device, entity, HACommand("set_temperature", 50))
+        self.assertEqual(
+            mapper.map_command(device, entity, HACommand("set_temperature", 50)),
+            (MLControlCommand(device.c_dev_id, "settemp", "60"),),
+        )
 
     def test_documented_ventilation_types_map_fan_and_advertised_telemetry(self) -> None:
         full = MLDevice(

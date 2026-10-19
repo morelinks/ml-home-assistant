@@ -20,6 +20,7 @@ _CURRENT_HUMIDITY = "hum"
 _SWING_MODE = "sweep"
 _MUTE = "mute_mode"
 _AUX_HEAT = "aux_heat"
+_TARGET_TEMPERATURE_LIMITS = (16, 36)
 
 _HVAC_MODES = {
     "0": "fan_only",
@@ -109,7 +110,7 @@ class AirConditionerMapper:
             consumed.append(_MODE)
             if mode.writable and self._values(mode, _HVAC_MODES):
                 commands.append("set_hvac_mode")
-            target = self._number(functions.get(_TARGET_TEMPERATURE), 16, 30)
+            target = self._number(functions.get(_TARGET_TEMPERATURE), *_TARGET_TEMPERATURE_LIMITS)
             if target is not None:
                 consumed.append(_TARGET_TEMPERATURE)
                 if target.writable:
@@ -207,7 +208,7 @@ class AirConditionerMapper:
                 MLControlCommand(
                     device.c_dev_id,
                     _TARGET_TEMPERATURE,
-                    self._number_command(device, _TARGET_TEMPERATURE, command.value, 16, 30),
+                    self._number_command(device, _TARGET_TEMPERATURE, command.value, *_TARGET_TEMPERATURE_LIMITS),
                 ),
             )
         if command.name == "set_fan_mode":
@@ -259,14 +260,17 @@ class AirConditionerMapper:
         else:
             attributes["hvac_modes"] = ("off",)
         for fun_no, attribute, minimum, maximum in (
-            (_TARGET_TEMPERATURE, "target_temperature", 16, 30),
+            (_TARGET_TEMPERATURE, "target_temperature", *_TARGET_TEMPERATURE_LIMITS),
             (_CURRENT_TEMPERATURE, "current_temperature", -10, 40),
             (_CURRENT_HUMIDITY, "current_humidity", 0, 100),
         ):
             function = self._number(functions.get(fun_no), minimum, maximum)
             if function is None:
                 continue
-            value = self._number_value(states.get(fun_no), function, minimum, maximum)
+            value = self._number_value(
+                states.get(fun_no), function, minimum, maximum,
+                clamp=fun_no == _TARGET_TEMPERATURE,
+            )
             if value is not None:
                 attributes[attribute] = value
             if fun_no == _TARGET_TEMPERATURE:
@@ -322,15 +326,16 @@ class AirConditionerMapper:
     def _limits(
         function: MLFunction, minimum: float, maximum: float
     ) -> tuple[float, float] | None:
-        try:
-            lower = float(function.minimum) if function.minimum else minimum
-            upper = float(function.maximum) if function.maximum else maximum
-        except ValueError:
-            return None
-        if not all(math.isfinite(value) for value in (lower, upper)):
-            return None
-        lower, upper = max(lower, minimum), min(upper, maximum)
-        return (lower, upper) if lower <= upper else None
+        def reported_or_default(raw: str, default: float) -> float:
+            try:
+                value = float(raw) if raw else default
+            except ValueError:
+                return default
+            return value if math.isfinite(value) else default
+
+        lower = reported_or_default(function.minimum, minimum)
+        upper = reported_or_default(function.maximum, maximum)
+        return (lower, upper) if lower <= upper else (minimum, maximum)
 
     @staticmethod
     def _values(function: MLFunction, choices: Mapping[str, str]) -> tuple[str, ...]:
@@ -378,7 +383,8 @@ class AirConditionerMapper:
         )
 
     def _number_value(
-        self, value: str | None, function: MLFunction, minimum: float, maximum: float
+        self, value: str | None, function: MLFunction, minimum: float, maximum: float,
+        *, clamp: bool = False,
     ) -> float | None:
         limits = self._limits(function, minimum, maximum)
         if value is None or limits is None:
@@ -387,7 +393,11 @@ class AirConditionerMapper:
             number = float(value)
         except ValueError:
             return None
-        return number if math.isfinite(number) and limits[0] <= number <= limits[1] else None
+        if not math.isfinite(number):
+            return None
+        if clamp:
+            return max(limits[0], min(number, limits[1]))
+        return number if limits[0] <= number <= limits[1] else None
 
     def _raw_value(
         self, device: MLDevice, fun_no: str, choices: Mapping[str, str], value: object | None
@@ -413,8 +423,7 @@ class AirConditionerMapper:
             raise UnsupportedHACommandError(f"{fun_no} is not supported")
         limits = self._limits(function, minimum, maximum)
         number = float(value)
-        if limits is None or not math.isfinite(number) or not limits[0] <= number <= limits[1]:
-            raise UnsupportedHACommandError(
-                f"{fun_no} must be between {minimum:g} and {maximum:g}"
-            )
+        if limits is None or not math.isfinite(number):
+            raise UnsupportedHACommandError(f"{fun_no} must be finite")
+        number = max(limits[0], min(number, limits[1]))
         return str(int(number)) if number.is_integer() else str(number)

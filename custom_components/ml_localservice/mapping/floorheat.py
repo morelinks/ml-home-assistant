@@ -82,7 +82,8 @@ class FloorHeatMapper:
         )
         if target is not None:
             value = self._number_value(
-                states.get(_TARGET_TEMPERATURE), target, *self.target_temperature_limits
+                states.get(_TARGET_TEMPERATURE), target, *self.target_temperature_limits,
+                clamp=True,
             )
             if value is not None:
                 attributes["target_temperature"] = value
@@ -162,27 +163,20 @@ class FloorHeatMapper:
     def _limits(
         function: MLFunction, minimum: float, maximum: float
     ) -> tuple[float, float] | None:
-        try:
-            lower = (
-                float(function.minimum)
-                if function.minimum
-                else minimum
-            )
-            upper = (
-                float(function.maximum)
-                if function.maximum
-                else maximum
-            )
-        except ValueError:
-            return None
-        if not all(math.isfinite(value) for value in (lower, upper)):
-            return None
-        lower = max(lower, minimum)
-        upper = min(upper, maximum)
-        return (lower, upper) if lower <= upper else None
+        def reported_or_default(raw: str, default: float) -> float:
+            try:
+                value = float(raw) if raw else default
+            except ValueError:
+                return default
+            return value if math.isfinite(value) else default
+
+        lower = reported_or_default(function.minimum, minimum)
+        upper = reported_or_default(function.maximum, maximum)
+        return (lower, upper) if lower <= upper else (minimum, maximum)
 
     def _number_value(
-        self, value: str | None, function: MLFunction, minimum: float, maximum: float
+        self, value: str | None, function: MLFunction, minimum: float, maximum: float,
+        *, clamp: bool = False,
     ) -> float | None:
         limits = self._limits(function, minimum, maximum)
         if value is None or limits is None:
@@ -191,9 +185,11 @@ class FloorHeatMapper:
             number = float(value)
         except ValueError:
             return None
-        if not math.isfinite(number) or not limits[0] <= number <= limits[1]:
+        if not math.isfinite(number):
             return None
-        return number
+        if clamp:
+            return max(limits[0], min(number, limits[1]))
+        return number if limits[0] <= number <= limits[1] else None
 
     def _temperature_command(self, device: MLDevice, value: object | None) -> str:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -208,8 +204,9 @@ class FloorHeatMapper:
             else None
         )
         number = float(value)
-        if limits is None or not math.isfinite(number) or not limits[0] <= number <= limits[1]:
-            raise UnsupportedHACommandError("settemp is outside the advertised range")
+        if limits is None or not math.isfinite(number):
+            raise UnsupportedHACommandError("settemp must be finite")
+        number = max(limits[0], min(number, limits[1]))
         return str(int(number)) if number.is_integer() else str(number)
 
     @staticmethod
@@ -222,6 +219,6 @@ class PanelFloorHeatMapper(FloorHeatMapper):
     """Map a floor-heating panel while preserving its ML business identity."""
 
     classification = "floor_heat_panel"
-    target_temperature_limits = (16.0, 31.0)
+    target_temperature_limits = (16.0, 36.0)
     current_temperature_limits = (-10.0, 60.0)
     include_current_humidity = True

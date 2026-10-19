@@ -3,10 +3,10 @@
   "name": "ML LocalService",
   "codeowners": ["@morelinkslian"],
   "config_flow": true,
-  "documentation": "https://github.com/morelinks-iot/ml-home-assistant",
+  "documentation": "https://github.com/morelinks/ml-home-assistant",
   "integration_type": "hub",
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/morelinks-iot/ml-home-assistant/issues",
+  "issue_tracker": "https://github.com/morelinks/ml-home-assistant/issues",
   "requirements": [],
   "version": "0.1.2",
   "zeroconf": [
