@@ -1,6 +1,6 @@
 # ML LocalService Home Assistant Integration
 
-[![HACS validation](https://github.com/morelinks-iot/ml-home-assistant/actions/workflows/validate.yaml/badge.svg)](https://github.com/morelinks-iot/ml-home-assistant/actions/workflows/validate.yaml)
+[![HACS validation](https://github.com/morelinks/ml-home-assistant/actions/workflows/validate.yaml/badge.svg)](https://github.com/morelinks/ml-home-assistant/actions/workflows/validate.yaml)
 
 ML LocalService is a local Home Assistant integration for MoreLinks ML
 gateways. It is distributed under the [Apache-2.0 license](LICENSE).
@@ -32,7 +32,7 @@ integration intentionally uses the separate, fixed appwsserver port 8820.
 After this repository is accepted by HACS, search for **ML LocalService** in
 HACS and install it from the Integrations section. Until it is listed in the
 HACS default repository, add
-`morelinks-iot/ml-home-assistant` as a HACS Custom repository with category
+`morelinks/ml-home-assistant` as a HACS Custom repository with category
 **Integration**.
 
 ### Manual installation
@@ -96,7 +96,7 @@ test. Never store host-search tokens; they are one-shot registration material.
 ## Support
 
 For usage questions and reproducible bugs, open an issue in the
-[GitHub issue tracker](https://github.com/morelinks-iot/ml-home-assistant/issues).
+[GitHub issue tracker](https://github.com/morelinks/ml-home-assistant/issues).
 Please include the Home Assistant version, integration version, relevant
 diagnostics with secrets removed, and steps to reproduce. Do not include
 gateway tokens, Home IDs, passwords, or private network details.
