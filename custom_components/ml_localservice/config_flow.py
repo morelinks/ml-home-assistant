@@ -132,22 +132,6 @@ class MLConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders={"name": title},
         )
 
-    def _configured_entry_by_home_fingerprint(
-        self, home_fingerprint: str
-    ) -> Any | None:
-        """Find the configured gateway with this verified Home ID fingerprint."""
-
-        if not home_fingerprint:
-            return None
-        config_entries = getattr(self.hass, "config_entries", None)
-        entries = getattr(config_entries, "async_entries", None)
-        if entries is None:
-            return None
-        for entry in entries(DOMAIN):
-            if _text(entry.data.get(CONF_HOME_FINGERPRINT)) == home_fingerprint:
-                return entry
-        return None
-
     def _replace_pending_discovery(self, gateway_id: str) -> None:
         """Replace an obsolete card for the same mDNS gateway.
 
@@ -215,7 +199,9 @@ class MLConfigFlow(ConfigFlow, domain=DOMAIN):
 
         updated_data = dict(entry.data)
         updated_data.update(candidate_data)
-        updated_data[CONF_GATEWAY_ID] = gateway_id
+        # Entity IDs use this key. Keep it stable when mDNS has identified a
+        # gateway that was originally configured by its manual endpoint.
+        updated_data[CONF_GATEWAY_ID] = entry.data.get(CONF_GATEWAY_ID, gateway_id)
         if verified_fingerprint:
             updated_data[CONF_HOME_FINGERPRINT] = verified_fingerprint
         title = _entry_title(gateway_id, host)
@@ -241,9 +227,9 @@ class MLConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors[CONF_HOST] = "invalid_host"
             else:
                 data = {
-                    # The ID is used only to obtain the one-shot token. After
-                    # hostSearch succeeds it is replaced by a stable identity
-                    # derived from the gateway's Home ID fingerprint.
+                    # UDP registration identifies the Home, not its individual
+                    # gateway. Use the explicit endpoint until mDNS supplies
+                    # the physical gateway ID; never key entries by Home alone.
                     CONF_GATEWAY_ID: f"manual-{host}",
                     CONF_HOST: host,
                     CONF_HOSTNAME: "",
@@ -255,10 +241,9 @@ class MLConfigFlow(ConfigFlow, domain=DOMAIN):
                 }
                 success, home_fingerprint = await self._async_test(data)
                 if success and len(home_fingerprint) == 32:
-                    gateway_id = f"udp-{home_fingerprint}"
-                    data[CONF_GATEWAY_ID] = gateway_id
+                    gateway_id = data[CONF_GATEWAY_ID]
                     data[CONF_HOME_FINGERPRINT] = home_fingerprint
-                    existing = self._abort_if_home_fingerprint_configured(data)
+                    existing = self._abort_if_endpoint_configured(data)
                     if existing is not None:
                         return existing
                     await self.async_set_unique_id(gateway_id)
@@ -340,9 +325,9 @@ class MLConfigFlow(ConfigFlow, domain=DOMAIN):
             )
         if not expected_fingerprint:
             self._entry_data[CONF_HOME_FINGERPRINT] = verified_fingerprint
-        existing = self._abort_if_home_fingerprint_configured(
-            self._entry_data,
-            prefer_gateway_identity=True,
+        self._abort_if_unique_id_configured()
+        existing = self._abort_if_endpoint_configured(
+            self._entry_data, discovered=True
         )
         if existing is not None:
             return existing
@@ -355,26 +340,48 @@ class MLConfigFlow(ConfigFlow, domain=DOMAIN):
             data=self._entry_data,
         )
 
-    def _abort_if_home_fingerprint_configured(
-        self, data: Mapping[str, Any], *, prefer_gateway_identity: bool = False
+    def _abort_if_endpoint_configured(
+        self, data: Mapping[str, Any], *, discovered: bool = False
     ) -> ConfigFlowResult | None:
-        """Avoid duplicate entries with the same verified Home identity."""
+        """Match manual/mDNS aliases only at the same verified endpoint.
 
+        A Home can contain several gateways. Its fingerprint verifies trust,
+        but cannot identify which gateway owns a Config Entry or its entities.
+        """
         fingerprint = _text(data.get(CONF_HOME_FINGERPRINT))
+        host = _text(data.get(CONF_HOST))
         config_entries = getattr(self.hass, "config_entries", None)
         entries = getattr(config_entries, "async_entries", None)
         update_entry = getattr(config_entries, "async_update_entry", None)
-        if not fingerprint or entries is None or update_entry is None:
+        if not fingerprint or not host or entries is None or update_entry is None:
             return None
         for entry in entries(DOMAIN):
-            if _text(entry.data.get(CONF_HOME_FINGERPRINT)) != fingerprint:
+            if (
+                _text(entry.data.get(CONF_HOST)) != host
+                or _text(entry.data.get(CONF_HOME_FINGERPRINT)) != fingerprint
+            ):
+                continue
+            if not discovered:
+                return self.async_abort(reason="already_configured")
+            gateway_id = data[CONF_GATEWAY_ID]
+            entry_id = _text(entry.unique_id)
+            if (
+                entry_id
+                and not entry_id.startswith(("manual-", "udp-"))
+                and entry_id != gateway_id
+            ):
+                # Even a reused IP/Home is not evidence that two distinct
+                # physical gateway IDs are interchangeable.
                 continue
             updated_data = dict(entry.data)
             updated_data.update(data)
-            update_kwargs: dict[str, Any] = {"data": updated_data}
-            if prefer_gateway_identity:
-                update_kwargs["unique_id"] = data[CONF_GATEWAY_ID]
-            update_entry(entry, **update_kwargs)
+            updated_data[CONF_GATEWAY_ID] = entry.data[CONF_GATEWAY_ID]
+            update_entry(
+                entry,
+                data=updated_data,
+                title=_entry_title(gateway_id, host),
+                unique_id=gateway_id,
+            )
             return self.async_abort(reason="already_configured")
         return None
 

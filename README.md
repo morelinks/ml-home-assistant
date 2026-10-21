@@ -56,7 +56,12 @@ announcement for the same guide is registration-checked before updating the
 displayed IP address and reloading the entry without creating a duplicate
 gateway. If a gateway is still waiting for confirmation, a newer mDNS
 announcement replaces the old discovery card so it does not retain a historical
-IP. The raw Home ID and registration token are not stored.
+IP. Multiple gateways in the same ML Home are configured independently; the
+Home fingerprint verifies registration and never merges different gateways.
+Manual IPv4 configuration uses an endpoint identity until mDNS identifies that
+same verified endpoint. The entity identity is retained during this association
+and subsequent address updates. The raw Home ID and registration token are not
+stored.
 
 ## Runtime behavior
 
