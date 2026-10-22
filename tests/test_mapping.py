@@ -466,7 +466,7 @@ class MappingTests(unittest.TestCase):
             self.registry.resolve(curtain).map_command(
                 curtain, cover, HACommand("set_cover_position", 65)
             ),
-            (MLControlCommand(curtain.c_dev_id, "2", "65"),),
+            (MLControlCommand(curtain.c_dev_id, "2", "35"),),
         )
 
         panel_event = MLDevice(
@@ -952,7 +952,7 @@ class MappingTests(unittest.TestCase):
         state = mapper.map_state(basic, {"status": "1", "position": "45"})[0]
         self.assertEqual(
             (state.available, dict(state.attributes)),
-            (True, {"is_opening": True, "is_closed": False, "current_cover_position": 45}),
+            (True, {"is_opening": True, "is_closed": False, "current_cover_position": 55}),
         )
         self.assertEqual(
             mapper.map_command(basic, basic_cover, HACommand("close_cover")),
@@ -960,7 +960,7 @@ class MappingTests(unittest.TestCase):
         )
         self.assertEqual(
             mapper.map_command(basic, basic_cover, HACommand("set_cover_position", 40)),
-            (MLControlCommand(basic.c_dev_id, "position", "40"),),
+            (MLControlCommand(basic.c_dev_id, "position", "60"),),
         )
 
         angled = MLDevice(
@@ -989,7 +989,7 @@ class MappingTests(unittest.TestCase):
         )[0]
         self.assertEqual(
             dict(angled_state.attributes),
-            {"current_cover_position": 60, "is_closed": False, "current_cover_tilt_position": 50},
+            {"current_cover_position": 40, "is_closed": False, "current_cover_tilt_position": 50},
         )
         angled_mapper = self.registry.resolve(angled)
         self.assertEqual(
@@ -1035,8 +1035,21 @@ class MappingTests(unittest.TestCase):
         )
         self.assertEqual(
             tuple(state.attributes["current_cover_position"] for state in states),
-            (25, 75),
+            (75, 25),
         )
+
+    def test_default_curtain_inversion_and_explicit_disable(self) -> None:
+        device = MLDevice("new-curtain", "Curtain", "12", "11200001", "", (
+            self._curtain_function("status"), self._curtain_function("position"),
+        ))
+        for selected, expected_ha, expected_ml in ((None, 75, "75"), (frozenset(), 25, "25")):
+            registry = create_default_registry(inverted_position_device_ids=selected)
+            mapper = registry.resolve(device)
+            entity, = mapper.map_entities(device)
+            state, = mapper.map_state(device, {"status": "0", "position": "25"})
+            self.assertEqual(state.attributes["current_cover_position"], expected_ha)
+            command, = mapper.map_command(device, entity, HACommand("set_cover_position", 25))
+            self.assertEqual(command.fun_val, expected_ml)
 
     def test_selected_curtain_positions_convert_both_directions_only(self) -> None:
         registry = create_default_registry(

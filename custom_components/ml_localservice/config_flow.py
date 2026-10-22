@@ -28,6 +28,7 @@ from .const import (
     CONF_GATEWAY_ID,
     CONF_HOME_FINGERPRINT,
     CONF_INVERTED_POSITION_DEVICE_IDS,
+    CONF_MISSING_STATE_FALLBACK,
     CONF_HOST,
     CONF_HOSTNAME,
     CONF_HV,
@@ -420,7 +421,7 @@ class MLConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class MLOptionsFlow(OptionsFlow):
-    """Select devices whose ML position represents the closed percentage."""
+    """Configure missing-state handling and curtain position conventions."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None,
@@ -434,25 +435,46 @@ class MLOptionsFlow(OptionsFlow):
             for device in runtime.coordinator.data.devices.values():
                 entities = runtime.registry.describe(device).entities
                 if any(
-                    entity.platform == "cover" and "set_cover_position" in entity.commands
+                    entity.platform == "cover" and set(entity.consumed_fun_nos).intersection(
+                        {"position", "day_position", "night_position", "2"}
+                    )
                     for entity in entities
                 ):
                     choices[device.c_dev_id] = f"{device.name} ({device.c_dev_id})"
+        if CONF_INVERTED_POSITION_DEVICE_IDS not in current:
+            # None means all devices, including ones discovered in the future.
+            # Saving this form creates an explicit selection, including [].
+            selected = sorted(choices)
         errors: dict[str, str] = {}
         if user_input is not None:
-            values = user_input.get(CONF_INVERTED_POSITION_DEVICE_IDS, [])
-            if (
+            values = user_input.get(CONF_INVERTED_POSITION_DEVICE_IDS, selected)
+            fallback = user_input.get(
+                CONF_MISSING_STATE_FALLBACK,
+                current.get(CONF_MISSING_STATE_FALLBACK, True),
+            )
+            if not isinstance(fallback, bool):
+                errors["base"] = "invalid_fallback"
+            elif (
                 isinstance(values, list)
                 and all(isinstance(value, str) and value in choices for value in values)
             ):
                 return self.async_create_entry(
                     title="",
-                    data={**current, CONF_INVERTED_POSITION_DEVICE_IDS: sorted(set(values))},
+                    data={
+                        **current,
+                        CONF_INVERTED_POSITION_DEVICE_IDS: sorted(set(values)),
+                        CONF_MISSING_STATE_FALLBACK: fallback,
+                    },
                 )
-            errors["base"] = "invalid_selection"
+            else:
+                errors["base"] = "invalid_selection"
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
+                vol.Optional(
+                    CONF_MISSING_STATE_FALLBACK,
+                    default=current.get(CONF_MISSING_STATE_FALLBACK, True),
+                ): selector.BooleanSelector(),
                 vol.Optional(CONF_INVERTED_POSITION_DEVICE_IDS, default=selected):
                     selector.SelectSelector(selector.SelectSelectorConfig(
                         options=[

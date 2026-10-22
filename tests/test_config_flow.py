@@ -68,19 +68,40 @@ class ConfigFlowTests(unittest.TestCase):
             serialized = FlowManagerIndexView(None)._prepare_result_json({
                 "type": FlowResultType.FORM, "data_schema": schema,
             })
-            self.assertEqual(len(serialized["data_schema"]), 1)
+            self.assertEqual(len(serialized["data_schema"]), 2)
             self.assertEqual(schema({})["inverted_position_device_ids"], ["missing"])
+            self.assertTrue(schema({})["missing_state_fallback"])
             chosen = schema({"inverted_position_device_ids": ["curtain", "missing"]})
             result = await flow.async_step_init(chosen)
             self.assertEqual(result["data"], {
                 "inverted_position_device_ids": ["curtain", "missing"], "other_option": True,
+                "missing_state_fallback": True,
             })
+            result = await flow.async_step_init({"missing_state_fallback": True})
+            self.assertTrue(result["data"]["missing_state_fallback"])
+            self.assertEqual(result["data"]["inverted_position_device_ids"], ["missing"])
+            entry.options["missing_state_fallback"] = False
+            form = await flow.async_step_init()
+            self.assertFalse(form["data_schema"]({})["missing_state_fallback"])
+            result = await flow.async_step_init({"inverted_position_device_ids": []})
+            self.assertFalse(result["data"]["missing_state_fallback"])
+            for invalid in ("true", 1, None):
+                result = await flow.async_step_init({"missing_state_fallback": invalid})
+                self.assertEqual(result["errors"], {"base": "invalid_fallback"})
             for invalid in (["other-gateway-device"], "curtain", [True]):
                 result = await flow.async_step_init({"inverted_position_device_ids": invalid})
                 self.assertEqual(result["errors"], {"base": "invalid_selection"})
             result = await flow.async_step_init({"inverted_position_device_ids": []})
             self.assertEqual(result["data"]["inverted_position_device_ids"], [])
             self.assertTrue(result["data"]["other_option"])
+            # Unconfigured gateways default to all discovered position devices;
+            # a saved empty selection must remain empty on subsequent visits.
+            entry.options = {}
+            form = await flow.async_step_init()
+            self.assertEqual(form["data_schema"]({})["inverted_position_device_ids"], ["curtain"])
+            entry.options = {"inverted_position_device_ids": []}
+            form = await flow.async_step_init()
+            self.assertEqual(form["data_schema"]({})["inverted_position_device_ids"], [])
         asyncio.run(run())
 
     def test_manual_schema_is_frontend_serializable(self) -> None:

@@ -23,6 +23,7 @@ class MLConfigEntryRuntime:
     gateway_id: str
     registry: MLMappingRegistry = field(default_factory=create_default_registry)
     platforms: dict[str, MLPlatformRuntime] = field(default_factory=dict)
+    missing_state_fallback: bool = True
 
     @property
     def client(self) -> MLClientProtocol | None:

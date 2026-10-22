@@ -76,6 +76,32 @@ stored.
   identity, so the same stable unique ID can recover later.
 - Unload closes the client and cancels the coordinator and platform-owned tasks.
 
+Each gateway's options include **Use fallback values when device state is
+missing**, enabled by default unless explicitly disabled. A synchronized gateway can keep
+an entity usable while its device is still listed but its required telemetry
+is absent. The entity uses its last reported state from the current loaded
+session; without a previous report, lights and switches show off and curtains
+show closed (position 0% when position is supported). Other entities without a
+previous report show unknown. Missing sensor measurements always show unknown;
+cached climate states omit current temperature and humidity. Missing optional
+fields do not replace an otherwise valid mapped state.
+
+The `state_source` attribute distinguishes `reported`, `last_known`, `default`
+and `unknown`. Defaults and retained history also set HA's `assumed_state` flag;
+automations may still use these displayed states. Fallbacks do not send commands,
+change raw ML state or satisfy control confirmation. Invalid required values,
+disconnected gateways and removed devices retain their existing unavailable
+behavior. History survives reconnects, but resets when the entity is reloaded,
+HA restarts, or its mapping/schema changes.
+
+Curtain position inversion is also enabled by default for gateways without a
+saved curtain selection: HA position is `100 - ML position` in both directions.
+The gateway options initially select all curtains with a position capability.
+Saving a selection overrides this default; deselect a device to use its original
+position convention, or clear the selection to disable inversion for all devices
+on that gateway. Existing saved selections, including empty ones, are preserved.
+This affects position only; open/close/stop commands and tilt remain unchanged.
+
 The diagnostics download redacts the gateway host and includes directory shape,
 mapping classifications and state counts, but not raw ML state values.
 

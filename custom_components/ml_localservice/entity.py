@@ -13,6 +13,7 @@ from .client import MLClientError
 from .mapping import HACommand, HAEntitySpec, HAEntityState, MLMappingError
 from .models import MLDevice
 from .runtime import MLConfigEntryRuntime
+from .state_fallback import ATTR_STATE_SOURCE, MissingStateFallback
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class MLEntity(Entity):
         self._spec = spec
         self._attr_unique_id = spec.unique_id(runtime.gateway_id)
         self._attr_name = spec.name
+        self._state_fallback = MissingStateFallback()
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -57,11 +59,18 @@ class MLEntity(Entity):
 
     @property
     def available(self) -> bool:
-        """Require a synchronized gateway and a valid mapped state."""
+        """Require a synchronized gateway and a usable display state."""
         return (
             self._runtime.coordinator.data.synchronized
             and self._mapped_state.available
         )
+
+    @property
+    def assumed_state(self) -> bool:
+        """Mark history and defaults as assumptions rather than ML feedback."""
+        return self._mapped_state.attributes.get(ATTR_STATE_SOURCE) in {
+            "last_known", "default",
+        }
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -110,24 +119,51 @@ class MLEntity(Entity):
     def _mapped_state(self) -> HAEntityState:
         device = self._device
         if device is None:
+            self._state_fallback.reset()
             return HAEntityState(self._spec.mapping_key, None, False)
         try:
             mapper = self._runtime.registry.resolve(device)
+            if self._spec not in mapper.map_entities(device):
+                self._state_fallback.reset()
+                return HAEntityState(self._spec.mapping_key, None, False)
             states = self._runtime.coordinator.data.states.get(device.c_dev_id, {})
-            return next(
+            mapped = next(
                 (
                     state
                     for state in mapper.map_state(device, states)
                     if state.mapping_key == self._spec.mapping_key
                 ),
-                HAEntityState(self._spec.mapping_key, None, False),
+                None,
+            )
+            if mapped is None:
+                self._state_fallback.reset()
+                return HAEntityState(self._spec.mapping_key, None, False)
+            signature = (
+                device.main_type, device.sub_type, self._spec,
+                tuple(
+                    (fun.fun_no, fun.readable, fun.writable,
+                     fun.minimum, fun.maximum, fun.range_values)
+                    for fun in device.functions
+                    if fun.fun_no in self._spec.consumed_fun_nos
+                ),
+            )
+            return self._state_fallback.apply(
+                self._spec, mapped,
+                enabled=self._runtime.missing_state_fallback,
+                synchronized=self._runtime.coordinator.data.synchronized,
+                missing=any(key not in states for key in self._spec.consumed_fun_nos),
+                context=signature,
             )
         except (KeyError, TypeError, ValueError):
+            self._state_fallback.reset()
             _LOGGER.debug(
                 "Invalid mapped state for ML entity %s", self.unique_id, exc_info=True
             )
             return HAEntityState(self._spec.mapping_key, None, False)
 
     def _handle_coordinator_update(self) -> None:
+        # Observe genuine updates even if HA has not yet read a property.
+        if self._runtime.missing_state_fallback:
+            _ = self._mapped_state
         if self.hass is not None:
             self.async_write_ha_state()

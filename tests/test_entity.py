@@ -120,6 +120,116 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
             [("twinkle", "true"), ("switch", "false")],
         )
 
+    async def test_missing_light_state_defaults_on_and_does_not_predict_controls(self) -> None:
+        self.coordinator.set_states({})
+        self.assertTrue(self.entity.available)
+        self.assertEqual(self.entity.state, "off")
+        self.runtime.missing_state_fallback = False
+        self.assertFalse(self.entity.available)
+        self.runtime.missing_state_fallback = True
+        self.assertTrue(self.entity.available)
+        self.assertEqual(self.entity.state, "off")
+        self.assertTrue(self.entity.assumed_state)
+        self.assertEqual(self.entity.extra_state_attributes["state_source"], "default")
+        await self.entity.async_turn_on()
+        self.assertEqual(self.entity.state, "off")
+        self.assertEqual(self.coordinator.data.states[self.device.c_dev_id], {})
+        self.assertEqual([(cmd.fun_no, cmd.fun_val) for cmd in self.coordinator.commands], [("switch", "true")])
+        self.coordinator.set_state("true")
+        self.entity._handle_coordinator_update()
+        self.coordinator.set_states({})
+        self.entity._handle_coordinator_update()
+        self.assertEqual(self.entity.state, "on")
+        self.assertEqual(self.entity.extra_state_attributes["state_source"], "last_known")
+        self.coordinator.set_state("false")
+        self.assertEqual(self.entity.state, "off")
+        self.assertFalse(self.entity.assumed_state)
+        self.assertEqual(self.entity.extra_state_attributes["state_source"], "reported")
+
+    async def test_fallback_cannot_hide_disconnect_removal_or_invalid_state(self) -> None:
+        self.runtime.missing_state_fallback = True
+        self.coordinator.set_state("true")
+        self.entity._handle_coordinator_update()
+        self.coordinator.set_states({}, synchronized=False)
+        self.assertFalse(self.entity.available)
+        self.coordinator.set_states({})
+        self.assertTrue(self.entity.available)
+        self.assertTrue(self.entity.is_on)
+        self.coordinator.set_state("bad")
+        self.assertFalse(self.entity.available)
+        self.assertEqual(self.entity.extra_state_attributes, {"invalid_ml_value": "bad"})
+        self.coordinator.data.devices = {}
+        self.entity._handle_coordinator_update()
+        self.assertFalse(self.entity.available)
+        self.coordinator.set_states({})
+        self.assertFalse(self.entity.is_on)
+        self.assertEqual(self.entity.extra_state_attributes["state_source"], "default")
+
+    async def test_fallback_history_resets_on_retyping_and_isolated_between_gateways(self) -> None:
+        self.runtime.missing_state_fallback = True
+        self.coordinator.set_state("true")
+        self.assertTrue(self.entity.is_on)
+        other_coordinator = FakeCoordinator(self.device)
+        other_coordinator.set_states({})
+        other_runtime = MLConfigEntryRuntime(other_coordinator, "gateway-2", missing_state_fallback=True)
+        other = MLLightEntity(other_runtime, other_runtime.registry.describe(self.device).entities[0])
+        self.assertFalse(other.is_on)
+        self.assertNotEqual(self.entity.unique_id, other.unique_id)
+        self.coordinator.device = replace(self.device, sub_type="10100002")
+        self.coordinator.set_states({})
+        self.entity.update_spec(self.runtime.registry.describe(self.coordinator.device).entities[0])
+        self.assertFalse(self.entity.is_on)
+        self.assertEqual(self.entity.extra_state_attributes["state_source"], "default")
+        self.coordinator.device = replace(self.device, main_type="unsupported", sub_type="unsupported")
+        self.coordinator.set_states({})
+        self.assertFalse(self.entity.available)
+
+    async def test_missing_measurement_is_unknown_without_fabricated_statistics(self) -> None:
+        device = MLDevice("temp", "Temperature", "3", "10300015", "", (
+            MLFunction("temp", "", True, False, "-10", "50", None, ""),
+        ))
+        coordinator = FakeCoordinator(device)
+        coordinator.set_states({})
+        runtime = MLConfigEntryRuntime(coordinator, "gateway-1", missing_state_fallback=True)
+        sensor = MLSensorEntity(runtime, runtime.registry.describe(device).entities[0])
+        self.assertTrue(sensor.available)
+        self.assertIsNone(sensor.native_value)
+        coordinator.set_states({"temp": "24.5"})
+        sensor._handle_coordinator_update()
+        self.assertEqual(sensor.native_value, 24.5)
+        coordinator.set_states({})
+        self.assertIsNone(sensor.native_value)
+        self.assertEqual(sensor.extra_state_attributes["state_source"], "unknown")
+        coordinator.set_states({"temp": "nan"})
+        self.assertFalse(sensor.available)
+
+    async def test_missing_cover_fallback_and_inversion_do_not_alter_wire_confirmation(self) -> None:
+        from custom_components.ml_localservice.mapping import create_default_registry
+        device = MLDevice("curtain", "Curtain", "12", "11200001", "", (
+            MLFunction("position", "", True, True, "0", "100", None, ""),
+            MLFunction("status", "", True, True, "", "", ("0", "1", "2"), ""),
+        ))
+        coordinator = FakeCoordinator(device)
+        coordinator.set_states({})
+        runtime = MLConfigEntryRuntime(
+            coordinator, "gateway-1", missing_state_fallback=True,
+            registry=create_default_registry(inverted_position_device_ids=frozenset({device.c_dev_id})),
+        )
+        cover = MLCoverEntity(runtime, runtime.registry.describe(device).entities[0])
+        self.assertTrue(cover.available)
+        self.assertEqual(cover.state, "closed")
+        self.assertEqual(cover.current_cover_position, 0)
+        await cover.async_set_cover_position(position=25)
+        self.assertEqual([(cmd.fun_no, cmd.fun_val) for cmd in coordinator.commands], [("position", "75")])
+        self.assertEqual(cover.current_cover_position, 0)
+        self.assertEqual(coordinator.data.states[device.c_dev_id], {})
+        coordinator.set_states({"position": "25", "status": "0"})
+        cover._handle_coordinator_update()
+        coordinator.set_states({})
+        self.assertEqual(cover.current_cover_position, 75)
+        self.assertEqual(cover.state, "open")
+        self.assertEqual(cover.extra_state_attributes["state_source"], "last_known")
+
     async def test_light_parameters_never_add_power_control(self) -> None:
         devices = {
             device.c_dev_id: device

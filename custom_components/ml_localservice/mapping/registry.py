@@ -106,7 +106,7 @@ class MLMappingRegistry:
 
 
 def create_default_registry(
-    *, inverted_position_device_ids: frozenset[str] = frozenset(),
+    *, inverted_position_device_ids: frozenset[str] | None = None,
 ) -> MLMappingRegistry:
     """Create the registry from documented category/device-category pairs."""
     registry = MLMappingRegistry()

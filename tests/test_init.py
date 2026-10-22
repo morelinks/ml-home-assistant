@@ -78,7 +78,10 @@ class ConfigEntryRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_setup_assigns_runtime_and_unload_stops_coordinator(self) -> None:
         client = RuntimeFakeClient()
         entry = self.entry()
-        entry.options = {"inverted_position_device_ids": ["curtain"]}
+        entry.options = {
+            "inverted_position_device_ids": ["curtain"],
+            "missing_state_fallback": True,
+        }
         hass = self.hass()
         with (
             patch(
@@ -91,6 +94,7 @@ class ConfigEntryRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(entry.runtime_data.coordinator.data.synchronized)
             self.assertIs(entry.runtime_data.client, client)
             self.assertEqual(entry.runtime_data.gateway_id, "fixture-gateway")
+            self.assertTrue(entry.runtime_data.missing_state_fallback)
             curtain = MLDevice("curtain", "Curtain", "12", "11200001", "", (
                 MLFunction("position", "", True, True, "0", "100", None, ""),
             ))
@@ -126,6 +130,14 @@ class ConfigEntryRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("close", client.calls)
         self.assertFalse(entry.runtime_data.coordinator.background_tasks)
+        self.assertTrue(entry.runtime_data.missing_state_fallback)
+        curtain = MLDevice("new-curtain", "Curtain", "12", "11200001", "", (
+            MLFunction("position", "", True, True, "0", "100", None, ""),
+        ))
+        mapper = entry.runtime_data.registry.resolve(curtain)
+        entity, = mapper.map_entities(curtain)
+        command, = mapper.map_command(curtain, entity, HACommand("set_cover_position", 25))
+        self.assertEqual(command.fun_val, "75")
         hass.config_entries.async_forward_entry_setups.assert_not_awaited()
 
     async def test_entry_update_reloads_the_same_config_entry(self) -> None:
@@ -141,6 +153,7 @@ class ConfigEntryRuntimeTests(unittest.IsolatedAsyncioTestCase):
         hass.config_entries.async_forward_entry_setups.side_effect = RuntimeError(
             "platform setup failed"
         )
+        entry.options = {"missing_state_fallback": False, "inverted_position_device_ids": []}
         with (
             patch(
                 "homeassistant.helpers.aiohttp_client.async_get_clientsession",
@@ -153,6 +166,15 @@ class ConfigEntryRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("close", client.calls)
         self.assertFalse(entry.runtime_data.coordinator.background_tasks)
+
+        self.assertFalse(entry.runtime_data.missing_state_fallback)
+        curtain = MLDevice("new-curtain", "Curtain", "12", "11200001", "", (
+            MLFunction("position", "", True, True, "0", "100", None, ""),
+        ))
+        mapper = entry.runtime_data.registry.resolve(curtain)
+        entity, = mapper.map_entities(curtain)
+        command, = mapper.map_command(curtain, entity, HACommand("set_cover_position", 25))
+        self.assertEqual(command.fun_val, "25")
 
 
 if __name__ == "__main__":

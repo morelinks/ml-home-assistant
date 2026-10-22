@@ -65,11 +65,18 @@ class CurtainMapper:
         classification: str = "curtain",
         *,
         numeric_epids: bool = False,
-        inverted_position_device_ids: frozenset[str] = frozenset(),
+        inverted_position_device_ids: frozenset[str] | None = None,
     ) -> None:
         self._classification = classification
         self._numeric_epids = numeric_epids
         self._inverted_position_device_ids = inverted_position_device_ids
+
+    def _invert_position(self, device: MLDevice) -> bool:
+        """Invert by default; a saved selection overrides the default."""
+        return (
+            self._inverted_position_device_ids is None
+            or device.c_dev_id in self._inverted_position_device_ids
+        )
 
     @property
     def _jog_fun_no(self) -> str:
@@ -131,9 +138,7 @@ class CurtainMapper:
                 result.append(
                     self._cover_state(
                         functions, states, definition,
-                        invert_position=(
-                            device.c_dev_id in self._inverted_position_device_ids
-                        ),
+                        invert_position=self._invert_position(device),
                     )
                 )
         return tuple(result)
@@ -171,7 +176,7 @@ class CurtainMapper:
             # Validate in HA coordinates before converting; advertised limits
             # describe the ML wire value, so apply them after conversion.
             percentage = float(self._percentage_command(command.value, None, 100.0))
-            if device.c_dev_id in self._inverted_position_device_ids:
+            if self._invert_position(device):
                 percentage = 100.0 - percentage
             return (
                 MLControlCommand(

@@ -31,6 +31,7 @@ CONF_SV: Final = "sv"
 CONF_HV: Final = "hv"
 CONF_HOME_FINGERPRINT: Final = "home_fingerprint"
 CONF_INVERTED_POSITION_DEVICE_IDS: Final = "inverted_position_device_ids"
+CONF_MISSING_STATE_FALLBACK: Final = "missing_state_fallback"
 MDNS_GATEWAY_ID: Final = "id"
 
 # The mDNS service advertises the gwconnect service port (10009).  The

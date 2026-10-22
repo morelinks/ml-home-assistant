@@ -32,15 +32,17 @@
   "options": {
     "step": {
       "init": {
-        "title": "Curtain position direction",
-        "description": "Select only curtains where ML reports 0 when fully open and 100 when fully closed. This reverses position display and position targets together; open, close, stop and tilt stay unchanged. For day/night curtains, both positions use this setting.",
+        "title": "Gateway state options",
+        "description": "Enable missing-state fallback to keep entities usable while the gateway is synchronized and the device is still listed. Lights and switches initially show off; curtains show closed. Otherwise the last reported state in this loaded session is retained. Missing measurements stay unknown. Assumed values may affect automations. Reported invalid values are not replaced. Curtain position inversion is enabled by default. All discovered position-capable curtains are initially selected; deselect devices which already use 0 fully closed and 100 fully open. Saved selections are preserved; this reverses position display and targets, including both day/night positions, without changing open, close, stop or tilt.",
         "data": {
-          "inverted_position_device_ids": "Curtains using closed percentage"
+          "inverted_position_device_ids": "Curtains using closed percentage",
+          "missing_state_fallback": "Use fallback values when device state is missing"
         }
       }
     },
     "error": {
-      "invalid_selection": "Choose curtains from this gateway."
+      "invalid_selection": "Choose curtains from this gateway.",
+      "invalid_fallback": "Choose whether to enable missing-state fallback."
     }
   }
 }

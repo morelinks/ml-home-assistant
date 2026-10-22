@@ -366,6 +366,24 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
                 projected, = mapper.map_state(curtain, coordinator.data.states["curtain"])
                 self.assertEqual(projected.attributes["current_cover_position"], 25)
 
+    async def test_display_default_does_not_confirm_a_control_without_ml_feedback(self) -> None:
+        from custom_components.ml_localservice.state_fallback import MissingStateFallback
+        lamp = device(sub_type="10100001")
+        mapper = create_default_registry().resolve(lamp)
+        entity, = mapper.map_entities(lamp)
+        raw, = mapper.map_state(lamp, {})
+        display = MissingStateFallback().apply(
+            entity, raw, enabled=True, synchronized=True, missing=True, context=entity,
+        )
+        self.assertIs(display.native_value, False)
+        command, = mapper.map_command(lamp, entity, HACommand("turn_off"))
+        client = FakeClient([(lamp,)], [(), ()])
+        coordinator = self.coordinator([client])
+        await coordinator.async_start()
+        with self.assertRaises(MLControlConfirmationTimeout):
+            await coordinator.async_control(command)
+        self.assertEqual(dict(coordinator.data.states[lamp.c_dev_id]), {})
+
     async def test_numeric_control_without_tolerance_still_requires_exact_match(self) -> None:
         client = FakeClient([(color_temp_device(),)], [(temp_state("3900"),)])
         coordinator = self.coordinator([client])

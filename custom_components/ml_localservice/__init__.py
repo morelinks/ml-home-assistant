@@ -11,6 +11,7 @@ from .const import (
     CONF_GATEWAY_ID,
     CONF_HOME_FINGERPRINT,
     CONF_INVERTED_POSITION_DEVICE_IDS,
+    CONF_MISSING_STATE_FALLBACK,
     CONF_HOST,
     CONF_PORT,
     DOMAIN,
@@ -78,9 +79,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: MLConfigEntry) -> bool:
         gateway_id=entry.data[CONF_GATEWAY_ID],
         registry=create_default_registry(
             inverted_position_device_ids=frozenset(
-                entry.options.get(CONF_INVERTED_POSITION_DEVICE_IDS, ())
-            ),
+                entry.options[CONF_INVERTED_POSITION_DEVICE_IDS]
+            ) if CONF_INVERTED_POSITION_DEVICE_IDS in entry.options else None,
         ),
+        missing_state_fallback=entry.options.get(CONF_MISSING_STATE_FALLBACK, True),
     )
     entry.runtime_data = runtime
     try:
