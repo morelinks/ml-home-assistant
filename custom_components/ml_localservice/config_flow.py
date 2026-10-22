@@ -8,7 +8,14 @@ from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
+from homeassistant.core import callback
+from homeassistant.helpers import selector
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 from .connection import ConnectionTestError, async_test_connection
@@ -20,6 +27,7 @@ from .const import (
     APPWSSERVER_PORT,
     CONF_GATEWAY_ID,
     CONF_HOME_FINGERPRINT,
+    CONF_INVERTED_POSITION_DEVICE_IDS,
     CONF_HOST,
     CONF_HOSTNAME,
     CONF_HV,
@@ -105,6 +113,12 @@ class MLConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle mDNS and manual ML gateway configuration."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> MLOptionsFlow:
+        """Configure position conventions independently for each gateway."""
+        return MLOptionsFlow()
 
     def __init__(self) -> None:
         self._entry_data: dict[str, Any] = {}
@@ -403,3 +417,50 @@ class MLConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             return False, ""
         return True, home_fingerprint if isinstance(home_fingerprint, str) else ""
+
+
+class MLOptionsFlow(OptionsFlow):
+    """Select devices whose ML position represents the closed percentage."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        current = self.config_entry.options
+        selected = current.get(CONF_INVERTED_POSITION_DEVICE_IDS, [])
+        # Retain saved selections when a device is temporarily missing.
+        choices = {device_id: device_id for device_id in selected}
+        runtime = getattr(self.config_entry, "runtime_data", None)
+        if runtime is not None:
+            for device in runtime.coordinator.data.devices.values():
+                entities = runtime.registry.describe(device).entities
+                if any(
+                    entity.platform == "cover" and "set_cover_position" in entity.commands
+                    for entity in entities
+                ):
+                    choices[device.c_dev_id] = f"{device.name} ({device.c_dev_id})"
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            values = user_input.get(CONF_INVERTED_POSITION_DEVICE_IDS, [])
+            if (
+                isinstance(values, list)
+                and all(isinstance(value, str) and value in choices for value in values)
+            ):
+                return self.async_create_entry(
+                    title="",
+                    data={**current, CONF_INVERTED_POSITION_DEVICE_IDS: sorted(set(values))},
+                )
+            errors["base"] = "invalid_selection"
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({
+                vol.Optional(CONF_INVERTED_POSITION_DEVICE_IDS, default=selected):
+                    selector.SelectSelector(selector.SelectSelectorConfig(
+                        options=[
+                            {"value": key, "label": label}
+                            for key, label in sorted(choices.items())
+                        ],
+                        multiple=True,
+                    )),
+            }),
+            errors=errors,
+        )

@@ -343,6 +343,29 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await coordinator.async_control(color_temp_command(6535))).success)
         self.assertEqual(client.calls.count("sync_states"), 1)
 
+    async def test_inverted_curtain_control_confirms_ml_value_and_projects_ha_value(self) -> None:
+        curtain = MLDevice("curtain", "Curtain", "12", "11200001", "", (
+            MLFunction("position", "", True, True, "0", "100", None, ""),
+        ))
+        registry = create_default_registry(inverted_position_device_ids=frozenset({"curtain"}))
+        mapper = registry.resolve(curtain)
+        entity, = mapper.map_entities(curtain)
+        command, = mapper.map_command(curtain, entity, HACommand("set_cover_position", 25))
+        for use_push in (True, False):
+            with self.subTest(use_push=use_push):
+                initial = MLDeviceState("curtain", "position", "100", "1")
+                target = MLDeviceState("curtain", "position", "75", "2")
+                client = FakeClient([(curtain,)], [(initial,), (target,)])
+                if use_push:
+                    client.on_control = lambda sent: client.events.put_nowait(target)
+                coordinator = self.coordinator([client])
+                await coordinator.async_start()
+                self.assertTrue((await coordinator.async_control(command)).success)
+                self.assertEqual(command.fun_val, "75")
+                self.assertEqual(client.calls.count("sync_states"), 1 if use_push else 2)
+                projected, = mapper.map_state(curtain, coordinator.data.states["curtain"])
+                self.assertEqual(projected.attributes["current_cover_position"], 25)
+
     async def test_numeric_control_without_tolerance_still_requires_exact_match(self) -> None:
         client = FakeClient([(color_temp_device(),)], [(temp_state("3900"),)])
         coordinator = self.coordinator([client])

@@ -10,12 +10,14 @@ from .const import (
     APPWSSERVER_PORT,
     CONF_GATEWAY_ID,
     CONF_HOME_FINGERPRINT,
+    CONF_INVERTED_POSITION_DEVICE_IDS,
     CONF_HOST,
     CONF_PORT,
     DOMAIN,
     PLATFORMS,
 )
 from .coordinator import MLCoordinator
+from .mapping import create_default_registry
 from .runtime import MLConfigEntryRuntime
 
 try:
@@ -74,6 +76,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: MLConfigEntry) -> bool:
     runtime = MLConfigEntryRuntime(
         coordinator=coordinator,
         gateway_id=entry.data[CONF_GATEWAY_ID],
+        registry=create_default_registry(
+            inverted_position_device_ids=frozenset(
+                entry.options.get(CONF_INVERTED_POSITION_DEVICE_IDS, ())
+            ),
+        ),
     )
     entry.runtime_data = runtime
     try:

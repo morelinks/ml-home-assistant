@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import custom_components.ml_localservice as integration
 from custom_components.ml_localservice.client import MLConnectionError
-from custom_components.ml_localservice.models import MLDevice, MLDeviceState
+from custom_components.ml_localservice.mapping import HACommand
+from custom_components.ml_localservice.models import MLDevice, MLDeviceState, MLFunction
 
 try:
     from homeassistant.exceptions import ConfigEntryNotReady
@@ -54,6 +55,7 @@ class ConfigEntryRuntimeTests(unittest.IsolatedAsyncioTestCase):
     def entry(self) -> SimpleNamespace:
         return SimpleNamespace(
             entry_id="entry-1",
+            options={},
             data={
                 "host": "192.0.2.10",
                 "gateway_id": "fixture-gateway",
@@ -76,6 +78,7 @@ class ConfigEntryRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_setup_assigns_runtime_and_unload_stops_coordinator(self) -> None:
         client = RuntimeFakeClient()
         entry = self.entry()
+        entry.options = {"inverted_position_device_ids": ["curtain"]}
         hass = self.hass()
         with (
             patch(
@@ -88,6 +91,13 @@ class ConfigEntryRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(entry.runtime_data.coordinator.data.synchronized)
             self.assertIs(entry.runtime_data.client, client)
             self.assertEqual(entry.runtime_data.gateway_id, "fixture-gateway")
+            curtain = MLDevice("curtain", "Curtain", "12", "11200001", "", (
+                MLFunction("position", "", True, True, "0", "100", None, ""),
+            ))
+            mapper = entry.runtime_data.registry.resolve(curtain)
+            entity, = mapper.map_entities(curtain)
+            command, = mapper.map_command(curtain, entity, HACommand("set_cover_position", 25))
+            self.assertEqual(command.fun_val, "75")
             hass.config_entries.async_forward_entry_setups.assert_awaited_once()
             self.assertTrue(await integration.async_unload_entry(hass, entry))
             hass.config_entries.async_unload_platforms.assert_awaited_once()

@@ -435,22 +435,26 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
             "11200007",
             "",
             (
-                MLFunction("5", "", True, True, "", "", ("0", "1", "2"), ""),
-                MLFunction("2", "", True, True, "0", "100", None, ""),
-                MLFunction("1", "", True, True, "0", "180", None, ""),
-                MLFunction("3", "", True, True, "", "", ("0", "1", "2"), ""),
-                MLFunction("8", "", True, True, "", "", ("0", "1"), ""),
+                MLFunction("status", "", True, True, "", "", ("0", "1", "2"), ""),
+                MLFunction("position", "", True, True, "0", "100", None, ""),
+                MLFunction("angle", "", True, True, "0", "180", None, ""),
+                MLFunction("control_back_mode", "", True, True, "", "", ("0", "1", "2"), ""),
+                MLFunction("jog", "", True, True, "", "", ("0", "1"), ""),
             ),
         )
         coordinator = FakeCoordinator(device)
-        coordinator.set_states({"5": "2", "2": "30", "1": "90", "3": "0"})
+        coordinator.set_states({"status": "2", "position": "30", "angle": "90", "control_back_mode": "0"})
         runtime = MLConfigEntryRuntime(coordinator, "gateway-1")  # type: ignore[arg-type]
+        from custom_components.ml_localservice.mapping import create_default_registry
+        runtime.registry = create_default_registry(
+            inverted_position_device_ids=frozenset({device.c_dev_id}),
+        )
         cover_spec, _jog_open, _jog_close = runtime.registry.describe(device).entities
         cover = MLCoverEntity(runtime, cover_spec)
         self.assertTrue(cover.is_closing)
         self.assertEqual(
             (cover.current_cover_position, cover.current_cover_tilt_position),
-            (30, 50),
+            (70, 50),
         )
         self.assertTrue(cover.supported_features & CoverEntityFeature.SET_POSITION)
         self.assertTrue(cover.supported_features & CoverEntityFeature.SET_TILT_POSITION)
@@ -461,7 +465,7 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
         await cover.async_close_cover_tilt()
         self.assertEqual(
             [(command.fun_no, command.fun_val) for command in coordinator.commands],
-            [("5", "1"), ("2", "70"), ("1", "45"), ("3", "2")],
+            [("status", "1"), ("position", "30"), ("angle", "45"), ("control_back_mode", "2")],
         )
 
     async def test_diagnostics_redacts_host_and_omits_values(self) -> None:

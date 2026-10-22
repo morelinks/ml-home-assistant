@@ -105,7 +105,9 @@ class MLMappingRegistry:
         return None, self._fallback
 
 
-def create_default_registry() -> MLMappingRegistry:
+def create_default_registry(
+    *, inverted_position_device_ids: frozenset[str] = frozenset(),
+) -> MLMappingRegistry:
     """Create the registry from documented category/device-category pairs."""
     registry = MLMappingRegistry()
     registry.register(RELAY_CONTAINER_TYPE, ContainerMapper())
@@ -127,7 +129,10 @@ def create_default_registry() -> MLMappingRegistry:
         PANEL_VENTILATION_TYPE, VentilationMapper("ventilation_panel")
     )
     registry.register(
-        PANEL_CURTAIN_TYPE, CurtainMapper("curtain_panel", numeric_epids=True)
+        PANEL_CURTAIN_TYPE, CurtainMapper(
+            "curtain_panel", numeric_epids=True,
+            inverted_position_device_ids=inverted_position_device_ids,
+        )
     )
     for device_type in SENSOR_TYPES:
         registry.register(device_type, SensorMapper.for_type(device_type))
@@ -136,5 +141,7 @@ def create_default_registry() -> MLMappingRegistry:
     for device_type in VENTILATION_TYPES:
         registry.register(device_type, VentilationMapper())
     for device_type in CURTAIN_TYPES:
-        registry.register(device_type, CurtainMapper())
+        registry.register(device_type, CurtainMapper(
+            inverted_position_device_ids=inverted_position_device_ids,
+        ))
     return registry

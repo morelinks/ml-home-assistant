@@ -28,5 +28,19 @@
       "missing_address": "The discovered service has no usable address.",
       "cannot_connect": "The ML gateway could not be reached or registered."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Curtain position direction",
+        "description": "Select only curtains where ML reports 0 when fully open and 100 when fully closed. This reverses position display and position targets together; open, close, stop and tilt stay unchanged. For day/night curtains, both positions use this setting.",
+        "data": {
+          "inverted_position_device_ids": "Curtains using closed percentage"
+        }
+      }
+    },
+    "error": {
+      "invalid_selection": "Choose curtains from this gateway."
+    }
   }
 }

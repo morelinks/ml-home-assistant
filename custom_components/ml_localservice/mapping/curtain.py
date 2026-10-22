@@ -61,10 +61,15 @@ class CurtainMapper:
     """
 
     def __init__(
-        self, classification: str = "curtain", *, numeric_epids: bool = False
+        self,
+        classification: str = "curtain",
+        *,
+        numeric_epids: bool = False,
+        inverted_position_device_ids: frozenset[str] = frozenset(),
     ) -> None:
         self._classification = classification
         self._numeric_epids = numeric_epids
+        self._inverted_position_device_ids = inverted_position_device_ids
 
     @property
     def _jog_fun_no(self) -> str:
@@ -123,7 +128,14 @@ class CurtainMapper:
                 # Jog points are actions, not stateful curtain position.
                 result.append(HAEntityState(entity.mapping_key, None, True))
             else:
-                result.append(self._cover_state(functions, states, definition))
+                result.append(
+                    self._cover_state(
+                        functions, states, definition,
+                        invert_position=(
+                            device.c_dev_id in self._inverted_position_device_ids
+                        ),
+                    )
+                )
         return tuple(result)
 
     def map_command(
@@ -156,11 +168,16 @@ class CurtainMapper:
             if definition.position_fun_no is None:
                 raise UnsupportedHACommandError("curtain position is not supported")
             function = functions[definition.position_fun_no]
+            # Validate in HA coordinates before converting; advertised limits
+            # describe the ML wire value, so apply them after conversion.
+            percentage = float(self._percentage_command(command.value, None, 100.0))
+            if device.c_dev_id in self._inverted_position_device_ids:
+                percentage = 100.0 - percentage
             return (
                 MLControlCommand(
                     device.c_dev_id,
                     definition.position_fun_no,
-                    self._percentage_command(command.value, function, 100.0),
+                    self._percentage_command(percentage, function, 100.0),
                 ),
             )
         if command.name in {
@@ -252,6 +269,8 @@ class CurtainMapper:
         functions: Mapping[str, MLFunction],
         states: Mapping[str, str],
         definition: _CoverDefinition,
+        *,
+        invert_position: bool = False,
     ) -> HAEntityState:
         attributes: dict[str, object] = {}
         valid = False
@@ -280,6 +299,8 @@ class CurtainMapper:
             100.0,
         )
         if position_value is not None:
+            if invert_position:
+                position_value = 100 - position_value
             valid = True
             attributes["current_cover_position"] = position_value
             attributes["is_closed"] = position_value == 0

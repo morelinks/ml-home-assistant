@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 try:
-    from custom_components.ml_localservice.config_flow import MLConfigFlow, _discovery_data, _manual_schema
+    from custom_components.ml_localservice.config_flow import MLConfigFlow, MLOptionsFlow, _discovery_data, _manual_schema
     from custom_components.ml_localservice.connection import ConnectionTestError
 except ModuleNotFoundError:  # pragma: no cover - local stdlib-only check
     MLConfigFlow = None  # type: ignore[assignment,misc]
@@ -41,9 +41,57 @@ class ConfigFlowTests(unittest.TestCase):
         self.assertEqual(data["port"], 8820)
         self.assertEqual(data["sv"], "4.1.6-18")
 
+    def test_curtain_options_validate_preserve_and_clear_selection(self) -> None:
+        from custom_components.ml_localservice.mapping import create_default_registry
+        from custom_components.ml_localservice.models import MLDevice, MLFunction
+        device = MLDevice("curtain", "Curtain", "12", "11200001", "", (
+            MLFunction("position", "", True, True, "0", "100", None, ""),
+        ))
+        entry = SimpleNamespace(
+            options={"inverted_position_device_ids": ["missing"], "other_option": True},
+            runtime_data=SimpleNamespace(
+                registry=create_default_registry(),
+                coordinator=SimpleNamespace(data=SimpleNamespace(devices={"curtain": device})),
+            ),
+        )
+        flow = MLOptionsFlow()
+        flow.handler = "gateway-1"
+        flow.hass = SimpleNamespace(config_entries=SimpleNamespace(async_get_known_entry=lambda ident: entry))
+        flow.async_show_form = lambda **kwargs: {"type": "form", **kwargs}
+        flow.async_create_entry = lambda **kwargs: {"type": "create_entry", **kwargs}
+
+        async def run() -> None:
+            form = await flow.async_step_init()
+            schema = form["data_schema"]
+            from homeassistant.data_entry_flow import FlowResultType
+            from homeassistant.helpers.data_entry_flow import FlowManagerIndexView
+            serialized = FlowManagerIndexView(None)._prepare_result_json({
+                "type": FlowResultType.FORM, "data_schema": schema,
+            })
+            self.assertEqual(len(serialized["data_schema"]), 1)
+            self.assertEqual(schema({})["inverted_position_device_ids"], ["missing"])
+            chosen = schema({"inverted_position_device_ids": ["curtain", "missing"]})
+            result = await flow.async_step_init(chosen)
+            self.assertEqual(result["data"], {
+                "inverted_position_device_ids": ["curtain", "missing"], "other_option": True,
+            })
+            for invalid in (["other-gateway-device"], "curtain", [True]):
+                result = await flow.async_step_init({"inverted_position_device_ids": invalid})
+                self.assertEqual(result["errors"], {"base": "invalid_selection"})
+            result = await flow.async_step_init({"inverted_position_device_ids": []})
+            self.assertEqual(result["data"]["inverted_position_device_ids"], [])
+            self.assertTrue(result["data"]["other_option"])
+        asyncio.run(run())
+
     def test_manual_schema_is_frontend_serializable(self) -> None:
-        import voluptuous_serialize
-        self.assertEqual(len(voluptuous_serialize.convert(_manual_schema())), 1)
+        from homeassistant.data_entry_flow import FlowResultType
+        from homeassistant.helpers.data_entry_flow import FlowManagerIndexView
+        # Use HA's actual frontend serializer, including on releases which
+        # no longer install voluptuous_serialize.
+        result = FlowManagerIndexView(None)._prepare_result_json({
+            "type": FlowResultType.FORM, "data_schema": _manual_schema(),
+        })
+        self.assertEqual(len(result["data_schema"]), 1)
 
     def test_mdns_discovery_is_visible_before_connection_probe(self) -> None:
         async def run() -> tuple[dict[str, object], dict[str, object]]:

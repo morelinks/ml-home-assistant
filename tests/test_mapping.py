@@ -1038,6 +1038,77 @@ class MappingTests(unittest.TestCase):
             (25, 75),
         )
 
+    def test_selected_curtain_positions_convert_both_directions_only(self) -> None:
+        registry = create_default_registry(
+            inverted_position_device_ids=frozenset({"selected"}),
+        )
+        for category, subtype, positions, statuses in (
+            ("12", "11200001", ("position",), ("status",)),
+            ("12", "11200007", ("position",), ("status",)),
+            ("12", "11200009", ("day_position", "night_position"), ("day_status", "night_status")),
+            ("15", "11500005", ("2",), ("5",)),
+        ):
+            device = MLDevice("selected", "Curtain", category, subtype, "", tuple(
+                self._curtain_function(key) for key in (*statuses, *positions)
+            ))
+            mapper = registry.resolve(device)
+            entities = mapper.map_entities(device)
+            self.assertEqual(entities, self.registry.describe(device).entities)
+            for ml_position, ha_position in ((0, 100), (100, 0), (25, 75)):
+                with self.subTest(subtype=subtype, ml_position=ml_position):
+                    values = {key: "0" for key in statuses}
+                    values.update({key: str(ml_position) for key in positions})
+                    states = mapper.map_state(device, values)
+                    for entity, state, key in zip(entities, states, positions):
+                        self.assertEqual(state.attributes["current_cover_position"], ha_position)
+                        self.assertEqual(state.attributes["is_closed"], ha_position == 0)
+                        command, = mapper.map_command(device, entity, HACommand("set_cover_position", ha_position))
+                        self.assertEqual((command.fun_no, command.fun_val), (key, str(ml_position)))
+                        self.assertTrue(command.matches_state(str(ml_position)))
+                        self.assertFalse(command.matches_state(str(ha_position)))
+                        for action, expected in (("open_cover", "1"), ("close_cover", "2"), ("stop_cover", "0")):
+                            action_command, = mapper.map_command(device, entity, HACommand(action))
+                            self.assertEqual(action_command.fun_val, expected)
+            other = MLDevice("other", device.name, category, subtype, "", device.functions)
+            self.assertEqual(
+                mapper.map_state(other, {positions[0]: "25"})[0].attributes["current_cover_position"], 25,
+            )
+            for bad in (None, "bad", "nan", "inf", "-1", "101"):
+                values = {key: "0" for key in statuses}
+                if bad is not None:
+                    values.update({key: bad for key in positions})
+                for state in mapper.map_state(device, values):
+                    self.assertNotIn("current_cover_position", state.attributes)
+                    self.assertNotIn("is_closed", state.attributes)
+            for bad in (None, True, "25", -1, 101, float("nan"), float("inf")):
+                with self.assertRaises(UnsupportedHACommandError):
+                    mapper.map_command(device, entities[0], HACommand("set_cover_position", bad))
+
+    def test_inverted_position_checks_ml_limits_and_preserves_tilt(self) -> None:
+        device = MLDevice("selected", "Curtain", "12", "11200008", "", (
+            self._curtain_function("status"),
+            MLFunction("position", "", True, True, "20", "80", None, ""),
+            self._curtain_function("angle_percent"),
+        ))
+        registry = create_default_registry(inverted_position_device_ids=frozenset({device.c_dev_id}))
+        mapper = registry.resolve(device)
+        entity, = mapper.map_entities(device)
+        # Use an asymmetric range to ensure validation occurs after inversion.
+        narrow = MLDevice(device.c_dev_id, device.name, "12", "11200008", "", (
+            self._curtain_function("status"),
+            MLFunction("position", "", True, True, "20", "60", None, ""),
+            self._curtain_function("angle_percent"),
+        ))
+        command, = mapper.map_command(narrow, entity, HACommand("set_cover_position", 75))
+        self.assertEqual(command.fun_val, "25")
+        with self.assertRaises(UnsupportedHACommandError):
+            mapper.map_command(narrow, entity, HACommand("set_cover_position", 25))
+        state, = mapper.map_state(device, {"status": "0", "position": "25", "angle_percent": "25"})
+        self.assertEqual(state.attributes["current_cover_position"], 75)
+        self.assertEqual(state.attributes["current_cover_tilt_position"], 25)
+        tilt, = mapper.map_command(device, entity, HACommand("set_cover_tilt_position", 25))
+        self.assertEqual((tilt.fun_no, tilt.fun_val), ("angle_percent", "25"))
+
     def test_curtains_skip_bad_schema_and_reject_invalid_controls(self) -> None:
         invalid = MLDevice(
             "invalid-curtain", "Invalid curtain", "12", "11200001", "", (
