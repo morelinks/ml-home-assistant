@@ -67,8 +67,14 @@ stored.
 
 - Setup connects, registers, synchronizes the device directory and states, then
   forwards the `light` and `switch` platforms.
-- Push notifications update entity state. A bounded full-state read confirms a
-  control if its push notification is missed.
+- Controls return when the gateway accepts the request. Missing or delayed
+  state feedback does not make an accepted action fail; rejection, request
+  timeout and connection errors still fail the action. Push notifications and
+  normal state synchronization update the actual state without predicting it
+  from accepted commands.
+- Selecting an air-conditioner operating mode waits for acceptance of the mode
+  request before turning on its writable power switch. Selecting off only turns the
+  power off. Devices with a read-only power switch retain mode-only control.
 - Disconnects mark entities unavailable. Reconnection repeats registration and
   both full synchronizations before making entities available again.
 - Directory refreshes dynamically add newly supported entities. Removed or
@@ -87,8 +93,9 @@ cached climate states omit current temperature and humidity. Missing optional
 fields do not replace an otherwise valid mapped state.
 
 The `state_source` attribute distinguishes `reported`, `last_known`, `default`
-and `unknown`. Defaults and retained history also set HA's `assumed_state` flag;
-automations may still use these displayed states. Fallbacks do not send commands,
+and `unknown` for diagnostics. Defaults and retained history use normal HA
+controls without setting `assumed_state`; automations may use these displayed
+states. Fallbacks do not send commands,
 change raw ML state or satisfy control confirmation. Invalid required values,
 disconnected gateways and removed devices retain their existing unavailable
 behavior. History survives reconnects, but resets when the entity is reloaded,

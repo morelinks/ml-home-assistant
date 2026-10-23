@@ -363,6 +363,7 @@ class MappingTests(unittest.TestCase):
             ),
             (
                 MLControlCommand(air_conditioner.c_dev_id, "mode", "2"),
+                MLControlCommand(air_conditioner.c_dev_id, "switch", "true"),
             ),
         )
 
@@ -655,7 +656,10 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(states[2].attributes["select_options"], ("auto", "on", "off"))
         self.assertEqual(
             mapper.map_command(device, climate, HACommand("set_hvac_mode", "cool")),
-            (MLControlCommand(device.c_dev_id, "mode", "2"),),
+            (
+                MLControlCommand(device.c_dev_id, "mode", "2"),
+                MLControlCommand(device.c_dev_id, "switch", "true"),
+            ),
         )
         self.assertEqual(
             mapper.map_command(device, climate, HACommand("set_hvac_mode", "off")),
@@ -680,6 +684,55 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(
             mapper.map_command(device, aux_heat, HACommand("select_option", "on")),
             (MLControlCommand(device.c_dev_id, "aux_heat", "1"),),
+        )
+
+    def test_air_conditioner_operating_modes_leave_standby(self) -> None:
+        for main_type, sub_type in (("6", "10600001"), ("15", "11500002")):
+            device = MLDevice(
+                "air-conditioner", "Air conditioner", main_type, sub_type, "",
+                (self._aircon_function("switch"), self._aircon_function("mode")),
+            )
+            mapper = self.registry.resolve(device)
+            entity = mapper.map_entities(device)[0]
+            for mode in ("fan_only", "heat", "cool", "auto", "dry"):
+                with self.subTest(sub_type=sub_type, mode=mode):
+                    states = {"switch": "false", "mode": "1"}
+                    commands = mapper.map_command(
+                        device, entity, HACommand("set_hvac_mode", mode)
+                    )
+                    self.assertEqual(
+                        tuple(command.fun_no for command in commands),
+                        ("mode", "switch"),
+                    )
+                    for command in commands:
+                        states[command.fun_no] = command.fun_val
+                    state = mapper.map_state(device, states)[0]
+                    self.assertTrue(state.available)
+                    self.assertEqual(state.native_value, mode)
+            self.assertEqual(
+                mapper.map_command(device, entity, HACommand("turn_on")),
+                (MLControlCommand(device.c_dev_id, "switch", "true"),),
+            )
+            self.assertEqual(
+                mapper.map_command(device, entity, HACommand("set_hvac_mode", "off")),
+                (MLControlCommand(device.c_dev_id, "switch", "false"),),
+            )
+            with self.assertRaises(UnsupportedHACommandError):
+                mapper.map_command(device, entity, HACommand("set_hvac_mode", "invalid"))
+
+    def test_air_conditioner_mode_change_preserves_read_only_power(self) -> None:
+        device = MLDevice(
+            "air-conditioner", "Air conditioner", "6", "10600001", "",
+            (
+                self._aircon_function("switch", writable=False),
+                self._aircon_function("mode"),
+            ),
+        )
+        mapper = self.registry.resolve(device)
+        entity = mapper.map_entities(device)[0]
+        self.assertEqual(
+            mapper.map_command(device, entity, HACommand("set_hvac_mode", "cool")),
+            (MLControlCommand(device.c_dev_id, "mode", "2"),),
         )
 
     def test_air_conditioner_skips_missing_main_schema_and_bad_values(self) -> None:

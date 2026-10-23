@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from unittest.mock import patch
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 
-from custom_components.ml_localservice.client import MLConnectionClosedError
+from custom_components.ml_localservice.client import (
+    MLConnectionClosedError,
+    MLRequestRejectedError,
+    MLTimeoutError,
+)
 from custom_components.ml_localservice.mapping import HACommand, create_default_registry
 from custom_components.ml_localservice.coordinator import (
     MLControlConfirmationTimeout,
@@ -159,6 +164,9 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.coordinators.append(coordinator)
         return coordinator
 
+    async def confirmed_control(self, coordinator, command):
+        return await coordinator.async_control(command, wait_for_confirmation=True)
+
     async def test_initial_sync_and_notifications_publish_immutable_snapshots(
         self,
     ) -> None:
@@ -284,13 +292,76 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("device-1", removal_diff.removed)
         self.assertNotIn("device-1", coordinator.data.devices)
 
+    async def test_default_control_accepts_without_feedback_or_state_prediction(self) -> None:
+        for snapshot in ((), (state("false"),), (state("true"),)):
+            with self.subTest(snapshot=snapshot):
+                client = FakeClient([(device(),)], [snapshot])
+                coordinator = self.coordinator([client])
+                await coordinator.async_start()
+                before = dict(coordinator.data.states["device-1"])
+                result = await coordinator.async_control(
+                    MLControlCommand("device-1", "switch", "true")
+                )
+                self.assertTrue(result.success)
+                self.assertEqual(dict(coordinator.data.states["device-1"]), before)
+                self.assertEqual(client.calls.count("sync_states"), 1)
+                self.assertFalse(coordinator._control_waiters)
+                await client.events.put(state("true"))
+                await wait_until(lambda: coordinator.data.states["device-1"].get("switch") == "true")
+                self.assertEqual(coordinator.data.states["device-1"]["switch"], "true")
+
+    async def test_default_control_waits_for_gateway_acceptance(self) -> None:
+        client = FakeClient([(device(),)], [(state("false"),)])
+        coordinator = self.coordinator([client])
+        await coordinator.async_start()
+        started = asyncio.Event()
+        accepted = asyncio.Event()
+
+        async def accept(command):
+            started.set()
+            await accepted.wait()
+            return MLControlResult(True, "ok", "control-1", "1")
+
+        with patch.object(client, "control", side_effect=accept):
+            task = asyncio.create_task(coordinator.async_control(
+                MLControlCommand("device-1", "switch", "true")
+            ))
+            try:
+                await asyncio.wait_for(started.wait(), 0.5)
+                self.assertFalse(task.done())
+                accepted.set()
+                self.assertTrue((await asyncio.wait_for(task, 0.5)).success)
+                self.assertEqual(coordinator.data.states["device-1"]["switch"], "false")
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_default_control_propagates_request_failures(self) -> None:
+        for error in (
+            MLRequestRejectedError("ctrlDev", "fixture rejection"),
+            MLTimeoutError("fixture timeout"),
+            MLConnectionClosedError("fixture disconnect"),
+        ):
+            with self.subTest(error=error):
+                client = FakeClient([(device(),)], [(state("false"),)])
+                coordinator = self.coordinator([client])
+                await coordinator.async_start()
+                with patch.object(client, "control", side_effect=error):
+                    with self.assertRaises(type(error)):
+                        await coordinator.async_control(
+                            MLControlCommand("device-1", "switch", "true")
+                        )
+                self.assertEqual(coordinator.data.states["device-1"]["switch"], "false")
+                self.assertFalse(coordinator._control_waiters)
+                self.assertEqual(client.calls.count("sync_states"), 1)
+
     async def test_control_waits_for_matching_real_notification(self) -> None:
         client = FakeClient([(device(),)], [(state("false"),)])
         coordinator = self.coordinator([client], confirmation_timeout=0.2)
         await coordinator.async_start()
 
         control = asyncio.create_task(
-            coordinator.async_control(MLControlCommand("device-1", "switch", "true"))
+            self.confirmed_control(coordinator, MLControlCommand("device-1", "switch", "true"))
         )
         await asyncio.wait_for(client.control_called.wait(), 0.2)
         self.assertEqual(coordinator.data.states["device-1"]["switch"], "false")
@@ -308,7 +379,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
                 client = FakeClient([(color_temp_device(),)], [(temp_state("4000"),)])
                 coordinator = self.coordinator([client], confirmation_timeout=0.5)
                 await coordinator.async_start()
-                control = asyncio.create_task(coordinator.async_control(color_temp_command()))
+                control = asyncio.create_task(self.confirmed_control(coordinator, color_temp_command()))
                 await asyncio.wait_for(client.control_called.wait(), 0.2)
                 self.assertFalse(control.done())
                 for invalid in ("3899", "4101", "bad", "NaN"):
@@ -328,10 +399,10 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
                 coordinator = self.coordinator([client])
                 await coordinator.async_start()
                 if value in ("3900", "4100"):
-                    self.assertTrue((await coordinator.async_control(color_temp_command())).success)
+                    self.assertTrue((await self.confirmed_control(coordinator, color_temp_command())).success)
                 else:
                     with self.assertRaises(MLControlConfirmationTimeout):
-                        await coordinator.async_control(color_temp_command())
+                        await self.confirmed_control(coordinator, color_temp_command())
                 self.assertEqual(client.calls.count("sync_states"), 2)
                 self.assertFalse(coordinator._control_waiters)
 
@@ -340,7 +411,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         client.on_control = lambda command: client.events.put_nowait(temp_state("5900"))
         coordinator = self.coordinator([client], confirmation_timeout=0.5)
         await coordinator.async_start()
-        self.assertTrue((await coordinator.async_control(color_temp_command(6535))).success)
+        self.assertTrue((await self.confirmed_control(coordinator, color_temp_command(6535))).success)
         self.assertEqual(client.calls.count("sync_states"), 1)
 
     async def test_inverted_curtain_control_confirms_ml_value_and_projects_ha_value(self) -> None:
@@ -360,7 +431,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
                     client.on_control = lambda sent: client.events.put_nowait(target)
                 coordinator = self.coordinator([client])
                 await coordinator.async_start()
-                self.assertTrue((await coordinator.async_control(command)).success)
+                self.assertTrue((await self.confirmed_control(coordinator, command)).success)
                 self.assertEqual(command.fun_val, "75")
                 self.assertEqual(client.calls.count("sync_states"), 1 if use_push else 2)
                 projected, = mapper.map_state(curtain, coordinator.data.states["curtain"])
@@ -381,7 +452,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         coordinator = self.coordinator([client])
         await coordinator.async_start()
         with self.assertRaises(MLControlConfirmationTimeout):
-            await coordinator.async_control(command)
+            await self.confirmed_control(coordinator, command)
         self.assertEqual(dict(coordinator.data.states[lamp.c_dev_id]), {})
 
     async def test_numeric_control_without_tolerance_still_requires_exact_match(self) -> None:
@@ -389,7 +460,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         coordinator = self.coordinator([client])
         await coordinator.async_start()
         with self.assertRaises(MLControlConfirmationTimeout):
-            await coordinator.async_control(MLControlCommand("device-1", "temp", "4000"))
+            await self.confirmed_control(coordinator, MLControlCommand("device-1", "temp", "4000"))
 
     async def test_control_timeout_performs_one_full_state_recheck(self) -> None:
         client = FakeClient(
@@ -399,7 +470,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         coordinator = self.coordinator([client])
         await coordinator.async_start()
 
-        result = await coordinator.async_control(
+        result = await self.confirmed_control(coordinator,
             MLControlCommand("device-1", "switch", "true")
         )
         self.assertTrue(result.success)
@@ -416,7 +487,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         await coordinator.async_start()
 
         with self.assertRaises(MLControlConfirmationTimeout):
-            await coordinator.async_control(
+            await self.confirmed_control(coordinator,
                 MLControlCommand("device-1", "switch", "true")
             )
         self.assertEqual(client.calls.count("sync_states"), 2)

@@ -202,7 +202,12 @@ class AirConditionerMapper:
             if command.value == "off":
                 return (MLControlCommand(device.c_dev_id, _POWER, _FALSE),)
             raw_mode = self._raw_value(device, _MODE, _HVAC_MODES, command.value)
-            return (MLControlCommand(device.c_dev_id, _MODE, raw_mode),)
+            commands = (MLControlCommand(device.c_dev_id, _MODE, raw_mode),)
+            # Selecting an operating mode must also leave standby. Submit the
+            # mode first so a rejected mode change cannot start the previous one.
+            if "turn_on" in entity.commands:
+                commands += (MLControlCommand(device.c_dev_id, _POWER, _TRUE),)
+            return commands
         if command.name == "set_temperature":
             return (
                 MLControlCommand(

@@ -240,9 +240,10 @@ class MLCoordinator:
         self,
         command: MLControlCommand,
         *,
+        wait_for_confirmation: bool = False,
         confirmation_timeout: float | None = None,
     ) -> MLControlResult:
-        """Submit a command and wait for push confirmation or one full recheck."""
+        """Return gateway acceptance, optionally requiring state confirmation."""
         if not isinstance(command, MLControlCommand):
             raise TypeError("command must be MLControlCommand")
         timeout = (
@@ -271,6 +272,10 @@ class MLCoordinator:
             )
 
         client = self._client
+        # Acceptance is enough for normal HA actions. Real telemetry continues
+        # through the event stream; never predict state from a control request.
+        if not wait_for_confirmation:
+            return await client.control(command)
         loop = asyncio.get_running_loop()
         future: asyncio.Future[None] = loop.create_future()
         key = (command.c_dev_id, command.fun_no)

@@ -13,7 +13,7 @@ from .client import MLClientError
 from .mapping import HACommand, HAEntitySpec, HAEntityState, MLMappingError
 from .models import MLDevice
 from .runtime import MLConfigEntryRuntime
-from .state_fallback import ATTR_STATE_SOURCE, MissingStateFallback
+from .state_fallback import MissingStateFallback
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ class MLEntity(Entity):
 
     _attr_has_entity_name = True
     _attr_should_poll = False
+    _attr_assumed_state = False
 
     def __init__(
         self, runtime: MLConfigEntryRuntime, spec: HAEntitySpec
@@ -64,13 +65,6 @@ class MLEntity(Entity):
             self._runtime.coordinator.data.synchronized
             and self._mapped_state.available
         )
-
-    @property
-    def assumed_state(self) -> bool:
-        """Mark history and defaults as assumptions rather than ML feedback."""
-        return self._mapped_state.attributes.get(ATTR_STATE_SOURCE) in {
-            "last_known", "default",
-        }
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

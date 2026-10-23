@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import unittest
 from pathlib import Path
@@ -129,7 +130,7 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.missing_state_fallback = True
         self.assertTrue(self.entity.available)
         self.assertEqual(self.entity.state, "off")
-        self.assertTrue(self.entity.assumed_state)
+        self.assertFalse(self.entity.assumed_state)
         self.assertEqual(self.entity.extra_state_attributes["state_source"], "default")
         await self.entity.async_turn_on()
         self.assertEqual(self.entity.state, "off")
@@ -141,6 +142,7 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
         self.entity._handle_coordinator_update()
         self.assertEqual(self.entity.state, "on")
         self.assertEqual(self.entity.extra_state_attributes["state_source"], "last_known")
+        self.assertFalse(self.entity.assumed_state)
         self.coordinator.set_state("false")
         self.assertEqual(self.entity.state, "off")
         self.assertFalse(self.entity.assumed_state)
@@ -219,6 +221,7 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(cover.available)
         self.assertEqual(cover.state, "closed")
         self.assertEqual(cover.current_cover_position, 0)
+        self.assertFalse(cover.assumed_state)
         await cover.async_set_cover_position(position=25)
         self.assertEqual([(cmd.fun_no, cmd.fun_val) for cmd in coordinator.commands], [("position", "75")])
         self.assertEqual(cover.current_cover_position, 0)
@@ -229,6 +232,7 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cover.current_cover_position, 75)
         self.assertEqual(cover.state, "open")
         self.assertEqual(cover.extra_state_attributes["state_source"], "last_known")
+        self.assertFalse(cover.assumed_state)
 
     async def test_light_parameters_never_add_power_control(self) -> None:
         devices = {
@@ -447,7 +451,7 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(aux_heat.options, ["auto", "on", "off"])
         self.assertEqual(
             [(command.fun_no, command.fun_val) for command in coordinator.commands],
-            [("mode", "1"), ("settemp", "25"), ("windspeed", "2"), ("sweep", "0"), ("mute_mode", "false"), ("aux_heat", "1")],
+            [("mode", "1"), ("switch", "true"), ("settemp", "25"), ("windspeed", "2"), ("sweep", "0"), ("mute_mode", "false"), ("aux_heat", "1")],
         )
 
         for power in ("true", "false", None):
@@ -459,8 +463,62 @@ class EntityTests(unittest.IsolatedAsyncioTestCase):
                 await climate.async_set_hvac_mode(HVACMode.OFF)
                 self.assertEqual(
                     [(cmd.fun_no, cmd.fun_val) for cmd in coordinator.commands],
-                    [("mode", "2"), ("switch", "true"), ("switch", "false")],
+                    [("mode", "2"), ("switch", "true"), ("switch", "true"), ("switch", "false")],
                 )
+
+    async def test_air_conditioner_waits_for_mode_and_power_acceptance(self) -> None:
+        from custom_components.ml_localservice.client import MLRequestRejectedError
+
+        device = MLDevice(
+            "air-conditioner", "Air conditioner", "6", "10600001", "",
+            (
+                MLFunction("switch", "", True, True, "", "", ("true", "false"), ""),
+                MLFunction("mode", "", True, True, "", "", ("1", "2"), ""),
+            ),
+        )
+        for failed_function in (None, "mode", "switch"):
+            with self.subTest(failed_function=failed_function):
+                coordinator = FakeCoordinator(device)
+                coordinator.set_states({"switch": "false", "mode": "1"})
+                runtime = MLConfigEntryRuntime(coordinator, "gateway-1")  # type: ignore[arg-type]
+                climate = MLClimateEntity(runtime, runtime.registry.describe(device).entities[0])
+                started = {name: asyncio.Event() for name in ("mode", "switch")}
+                accepted = {name: asyncio.Event() for name in started}
+
+                async def control(command):
+                    coordinator.commands.append(command)
+                    started[command.fun_no].set()
+                    await accepted[command.fun_no].wait()
+                    if command.fun_no == failed_function:
+                        raise MLRequestRejectedError("ctrlDev", "fixture rejection")
+                    coordinator.data.states[device.c_dev_id][command.fun_no] = command.fun_val
+
+                with patch.object(coordinator, "async_control", side_effect=control):
+                    task = asyncio.create_task(climate.async_set_hvac_mode(HVACMode.COOL))
+                    try:
+                        await asyncio.wait_for(started["mode"].wait(), 0.5)
+                        self.assertFalse(started["switch"].is_set())
+                        self.assertEqual(climate.hvac_mode, HVACMode.OFF)
+                        accepted["mode"].set()
+                        if failed_function != "mode":
+                            await asyncio.wait_for(started["switch"].wait(), 0.5)
+                            self.assertFalse(task.done())
+                            self.assertEqual(climate.hvac_mode, HVACMode.OFF)
+                            accepted["switch"].set()
+                        if failed_function is None:
+                            await asyncio.wait_for(task, 0.5)
+                            self.assertEqual(climate.hvac_mode, HVACMode.COOL)
+                        else:
+                            with self.assertRaisesRegex(HomeAssistantError, "fixture rejection"):
+                                await asyncio.wait_for(task, 0.5)
+                            self.assertEqual(climate.hvac_mode, HVACMode.OFF)
+                        self.assertEqual(
+                            [command.fun_no for command in coordinator.commands],
+                            ["mode"] if failed_function == "mode" else ["mode", "switch"],
+                        )
+                    finally:
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
 
     async def test_floor_heat_climate_entity_uses_zero_temperature_bounds(self) -> None:
         device = MLDevice(
